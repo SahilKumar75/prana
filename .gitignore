@@ -35,3 +35,19 @@ backend/target/
 *.jar
 *.war
 
+.vercel
+
+# ── AI / IDE tool config folders ──────────────────────────────────────────────
+.agents/
+.claude/
+.kiro/
+.trae/
+.windsurf/
+skills/
+skills-lock.json
+
+# ── Mobile env (secrets) ──────────────────────────────────────────────────────
+mobile/.env
+
+# ── Supabase local temp ───────────────────────────────────────────────────────
+supabase/.temp/
