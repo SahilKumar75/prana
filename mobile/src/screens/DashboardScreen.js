@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Animated, ActivityIndicator, ScrollView,
+  ActivityIndicator, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +14,6 @@ import {
 } from '@expo-google-fonts/space-grotesk';
 import { api } from '../lib/api';
 
-// ─── Design tokens ─────────────────────────────────────────────────────────
 const C = {
   bg:    '#f2f3f5',
   white: '#ffffff',
@@ -24,32 +23,26 @@ const C = {
   muted: '#bbbbbe',
 };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-const statusMeta = {
-  processed: { color: '#3a6e00', bg: '#c9f158', label: '+Done'    },
-  error:     { color: '#c0392b', bg: '#fce8e6', label: 'Error'    },
-  pending:   { color: '#9a6e00', bg: '#fef7e0', label: '~Pending' },
-};
-const getStatus = (st) => statusMeta[st] ?? { color: C.muted, bg: '#f0f0f0', label: 'Pending' };
+const DUMMY_SESSIONS = [
+  { id: 'd1', language: 'Patient Consultation', created_at: new Date(Date.now() - 1*60*60*1000).toISOString(), status: 'processed', icon: 'person-outline',        lang: 'hi-IN', duration: '4 min' },
+  { id: 'd2', language: 'Follow-up Note',       created_at: new Date(Date.now() - 3*60*60*1000).toISOString(), status: 'processed', icon: 'document-text-outline', lang: 'en-IN', duration: '2 min' },
+  { id: 'd3', language: 'Discharge Summary',    created_at: new Date(Date.now() - 6*60*60*1000).toISOString(), status: 'pending',   icon: 'clipboard-outline',     lang: 'hi-IN', duration: '7 min' },
+  { id: 'd4', language: 'OPD Voice Note',        created_at: new Date(Date.now() - 1*24*60*60*1000).toISOString(), status: 'processed', icon: 'mic-circle-outline',    lang: 'en-IN', duration: '1 min' },
+];
 
-const fmt = (iso) => {
+const statusMeta = {
+  processed: { color: '#3a6e00', bg: '#c9f158' },
+  error:     { color: '#c0392b', bg: '#fce8e6' },
+  pending:   { color: '#7a5c00', bg: '#fff8e1' },
+};
+
+function fmtTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }) +
-    ', ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-};
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function DashboardScreen({ navigation }) {
-  const [sessions, setSessions] = useState([]);
-  const [stats,    setStats]    = useState(null);
-  const [loading,  setLoading]  = useState(true);
-  const [offline,  setOffline]  = useState(false);
-  const [hidden,   setHidden]   = useState(false);
-
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(24)).current;
-
   const [fontsLoaded] = useFonts({
     SpaceGrotesk_400Regular,
     SpaceGrotesk_500Medium,
@@ -57,252 +50,214 @@ export default function DashboardScreen({ navigation }) {
     SpaceGrotesk_700Bold,
   });
 
-  const loadData = async () => {
-    setOffline(false);
+  const [sessions, setSessions]  = useState([]);
+  const [stats,    setStats]     = useState({ total: 0, processed: 0 });
+  const [loading,  setLoading]   = useState(true);
+  const [offline,  setOffline]   = useState(false);
+
+  async function loadData() {
     try {
-      const [sessData, statsData] = await Promise.all([api.getSessions(), api.getStats()]);
-      setSessions(sessData);
-      setStats(statsData);
+      const [s, st] = await Promise.all([api.getSessions(), api.getStats()]);
+      setSessions(s);
+      setStats(st);
+      setOffline(false);
     } catch {
       setOffline(true);
     } finally {
       setLoading(false);
-      Animated.parallel([
-        Animated.timing(fadeAnim,  { toValue: 1, duration: 400, useNativeDriver: true }),
-        Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
-      ]).start();
     }
-  };
+  }
 
   useEffect(() => { loadData(); }, []);
 
-  const total          = sessions.length;
-  const processedCount = stats?.processedCount ?? sessions.filter(s => s.status === 'processed').length;
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  if (loading || !fontsLoaded) {
-    return (
-      <SafeAreaView style={s.container} edges={['top']}>
-        <View style={s.center}><ActivityIndicator size="large" color={C.dark} /></View>
-      </SafeAreaView>
-    );
-  }
+  if (!fontsLoaded) return null;
+
+  const recentSessions = sessions.slice(0, 4);
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
-      <Animated.ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={s.scroll}
-        style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
-      >
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
 
-        {/* ── HEADER ─────────────────────────────────────────────────────── */}
+        {/* HEADER */}
         <View style={s.header}>
           <View>
-            <Text style={s.greeting}>Good morning, Doctor</Text>
-            <Text style={s.greetingSub}>Welcome to Prana</Text>
+            <Text style={s.name}>{greeting}, Doctor</Text>
+            <Text style={s.greeting}>Welcome to Prana</Text>
           </View>
-          <TouchableOpacity style={s.headerBtn} onPress={() => { setLoading(true); loadData(); }} activeOpacity={0.7}>
-            <Ionicons name="notifications-outline" size={20} color={C.dark} />
+          <TouchableOpacity style={s.bellBtn} activeOpacity={0.7}>
+            <Ionicons name="notifications-outline" size={22} color={C.dark} />
           </TouchableOpacity>
         </View>
 
-        {/* ── OFFLINE ────────────────────────────────────────────────────── */}
+        {/* OFFLINE BANNER */}
         {offline && (
           <TouchableOpacity style={s.offlineBanner} onPress={() => { setLoading(true); loadData(); }} activeOpacity={0.8}>
-            <Ionicons name="wifi-outline" size={14} color="#92400e" />
+            <Ionicons name="wifi-outline" size={16} color="#92400e" />
             <Text style={s.offlineTxt}>Backend offline — tap to retry</Text>
           </TouchableOpacity>
         )}
 
-        {/* ── HERO CARD ──────────────────────────────────────────────────── */}
+        {/* HERO CARD */}
         <View style={s.heroCard}>
-          {/* Label row */}
           <Text style={s.heroLabel}>Your sessions</Text>
-
-          {/* Number + eye icon on same row */}
-          <View style={s.heroNumRow}>
-            <Text style={s.heroNum}>{hidden ? '••••' : String(total)}</Text>
-            <TouchableOpacity onPress={() => setHidden(!hidden)} activeOpacity={0.7}>
-              <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={22} color={C.muted} />
-            </TouchableOpacity>
+          <View style={s.heroRow}>
+            <Text style={s.heroCount}>{loading ? '—' : stats.total}</Text>
           </View>
-
-          {/* Full-width black pill CTA */}
-          <TouchableOpacity style={s.heroCTA} onPress={() => navigation.navigate('Record')} activeOpacity={0.85}>
-            <Text style={s.heroCTATxt}>Start recording</Text>
+          <TouchableOpacity
+            style={s.startBtn}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('Record')}
+          >
+            <Text style={s.startTxt}>Start recording</Text>
           </TouchableOpacity>
         </View>
 
-        {/* ── YOUR NOTES (card carousel) ─────────────────────────────────── */}
+        {/* YOUR NOTES */}
         <View style={s.sectionHeader}>
           <Text style={s.sectionTitle}>Your notes</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Record')} activeOpacity={0.7}>
-            <Text style={s.sectionLink}>+ New note</Text>
-          </TouchableOpacity>
+          <TouchableOpacity activeOpacity={0.7}><Text style={s.seeAll}>See all</Text></TouchableOpacity>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={s.cardsScroll}
-          contentContainerStyle={s.cardsContent}
-        >
-          {/* Lime (active) card */}
-          <TouchableOpacity style={[s.noteCard, s.noteCardLime]} onPress={() => navigation.navigate('History')} activeOpacity={0.88}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.notesScroll} style={s.notesScrollWrap}>
+          {/* Lime note card */}
+          <TouchableOpacity style={[s.noteCard, s.noteCardLime]} activeOpacity={0.85}>
             <View style={s.ncTop}>
               <Text style={s.ncLogo}>P.</Text>
-              <Ionicons name="mic" size={20} color={C.dark} />
+              <Ionicons name="mic-outline" size={20} color={C.dark} />
             </View>
             <View style={s.ncBottom}>
               <View>
                 <Text style={s.ncType}>Voice Note</Text>
-                <Text style={s.ncId}>•••• {processedCount || '0'} done</Text>
+                <Text style={s.ncId}>#VN-001</Text>
               </View>
-              <TouchableOpacity style={s.detailsBtn} activeOpacity={0.8}>
-                <Ionicons name="eye-outline" size={13} color={C.dark} />
+              <View style={s.detailsBtn}>
                 <Text style={s.detailsTxt}>Details</Text>
-              </TouchableOpacity>
+                <Ionicons name="arrow-forward" size={12} color={C.dark} />
+              </View>
             </View>
           </TouchableOpacity>
 
-          {/* Dark card */}
-          <TouchableOpacity style={[s.noteCard, s.noteCardDark]} onPress={() => navigation.navigate('History')} activeOpacity={0.88}>
+          {/* Dark note card */}
+          <TouchableOpacity style={[s.noteCard, s.noteCardDark]} activeOpacity={0.85}>
             <View style={s.ncTop}>
-              <Text style={[s.ncLogo, { color: '#555' }]}>P.</Text>
-              <Text style={s.ncVisaLbl}>AI</Text>
+              <Text style={[s.ncLogo, { color: C.white }]}>P.</Text>
+              <Ionicons name="document-text-outline" size={20} color={C.white} />
             </View>
             <View style={s.ncBottom}>
               <View>
-                <Text style={[s.ncType, { color: C.muted }]}>Clinical Note</Text>
-                <Text style={[s.ncId, { color: C.muted }]}>•••• {total} total</Text>
+                <Text style={[s.ncType, { color: C.white }]}>Clinical Note</Text>
+                <Text style={[s.ncId,   { color: C.muted  }]}>#CN-001</Text>
+              </View>
+              <View style={[s.detailsBtn, { backgroundColor: '#333' }]}>
+                <Text style={[s.detailsTxt, { color: C.white }]}>Details</Text>
+                <Ionicons name="arrow-forward" size={12} color={C.white} />
               </View>
             </View>
           </TouchableOpacity>
         </ScrollView>
 
-        {/* ── TRANSACTIONS / SESSIONS ────────────────────────────────────── */}
-        <View style={s.sectionHeader}>
-          <Text style={s.sectionTitle}>Transactions</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('History')} activeOpacity={0.7}>
-            <Text style={s.sectionLink}>See all</Text>
-          </TouchableOpacity>
-        </View>
-
-        {sessions.length > 0 ? (
-          <View style={s.txCard}>
-            {sessions.slice(0, 5).map((item, idx) => {
-              const meta   = getStatus(item.status);
-              const isLast = idx === Math.min(sessions.length, 5) - 1;
-              const isDone = item.status === 'processed';
+        {/* TRANSACTIONS / RECENT SESSIONS */}
+        <View style={s.txCard}>
+          {/* Header inside card */}
+          <View style={s.txCardHeader}>
+            <Text style={s.txCardTitle}>Recent sessions</Text>
+            <TouchableOpacity activeOpacity={0.7} onPress={() => navigation.navigate('History')}>
+              <Text style={s.seeAll}>See all</Text>
+            </TouchableOpacity>
+          </View>
+          {loading ? (
+            <View style={s.txEmptyRow}>
+              <ActivityIndicator size="small" color={C.muted} />
+              <Text style={{ fontSize: 13, color: C.muted, fontFamily: 'SpaceGrotesk_400Regular' }}>Loading...</Text>
+            </View>
+          ) : (
+            (recentSessions.length > 0 ? recentSessions : DUMMY_SESSIONS).map((sess, i, arr) => {
+              const meta   = statusMeta[sess.status] || statusMeta.pending;
+              const isLast = i === arr.length - 1;
               return (
                 <TouchableOpacity
-                  key={String(item.id)}
+                  key={sess.id}
                   style={[s.txRow, !isLast && s.txBorder]}
-                  onPress={() => navigation.navigate('SessionDetail', { session: item })}
                   activeOpacity={0.7}
+                  onPress={() => navigation.navigate('SessionDetail', { session: sess })}
                 >
                   <View style={s.txIcon}>
-                    <Ionicons name="mic-outline" size={20} color={C.dark} />
+                    <Ionicons name={sess.icon || 'mic-outline'} size={22} color={C.dark} />
                   </View>
                   <View style={s.txBody}>
-                    <Text style={s.txName} numberOfLines={1}>
-                      {item.raw_transcript ? item.raw_transcript.slice(0, 26) + '…' : 'Voice session'}
-                    </Text>
-                    <Text style={s.txTime}>{fmt(item.created_at)}</Text>
+                    <Text style={s.txName}>{sess.language || 'Voice Note'}</Text>
+                    <Text style={s.txTime}>{fmtTime(sess.created_at)}</Text>
                   </View>
                   <View style={s.txRight}>
-                    <Text style={s.txAmt}>
-                      {item.language ? '-' + item.language.split('-')[0].toUpperCase() : '—'}
-                    </Text>
-                    {isDone && (
-                      <View style={s.cashPill}>
-                        <Text style={s.cashTxt}>+Done</Text>
-                      </View>
-                    )}
+                    <Text style={s.txDuration}>{sess.duration || '3 min'}</Text>
+                    <View style={[s.cashPill, { backgroundColor: meta.bg }]}>
+                      <Text style={[s.cashTxt, { color: meta.color }]}>{sess.lang || 'hi-IN'}</Text>
+                    </View>
                   </View>
                 </TouchableOpacity>
               );
-            })}
-          </View>
-        ) : (
-          <View style={s.txCard}>
-            <View style={s.txEmptyRow}>
-              <View style={s.txIcon}>
-                <Ionicons name="mic-outline" size={20} color={C.muted} />
-              </View>
-              <View style={s.txBody}>
-                <Text style={[s.txName, { color: C.muted }]}>No sessions yet</Text>
-                <Text style={s.txTime}>Tap Start recording to begin</Text>
-              </View>
-            </View>
-          </View>
-        )}
+            })
+          )}
+        </View>
 
         <View style={{ height: 130 }} />
-      </Animated.ScrollView>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  center:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scroll:    { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 100 },
+  scroll:    { paddingHorizontal: 20, paddingTop: 12 },
 
-  // Header
-  header:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 },
-  greeting:    { fontSize: 22, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: -0.3 },
-  greetingSub: { fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.gray, marginTop: 2 },
-  headerBtn:   { width: 42, height: 42, borderRadius: 13, backgroundColor: C.white, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 8, elevation: 2 },
+  header:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  name:      { fontSize: 22, fontFamily: 'SpaceGrotesk_700Bold',    color: C.dark },
+  greeting:  { fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', color: C.gray, marginTop: 3 },
+  bellBtn:   { width: 44, height: 44, borderRadius: 14, backgroundColor: C.white, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
 
-  // Offline
   offlineBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FEF3C7', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 },
   offlineTxt:    { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#92400e', flex: 1 },
 
-  // Hero card — matches reference exactly
-  heroCard:   { backgroundColor: C.white, borderRadius: 24, padding: 22, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 14, elevation: 4 },
-  heroLabel:  { fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', color: C.gray, marginBottom: 4 },
-  heroNumRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 },
-  heroNum:    { fontSize: 42, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: -1.5, lineHeight: 50 },
-  heroCTA:    { backgroundColor: C.dark, borderRadius: 50, paddingVertical: 17, alignItems: 'center' },
-  heroCTATxt: { color: C.white, fontSize: 15, fontFamily: 'SpaceGrotesk_600SemiBold' },
+  heroCard:  { backgroundColor: C.white, borderRadius: 24, padding: 22, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12, elevation: 4 },
+  heroLabel: { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray, marginBottom: 6 },
+  heroRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
+  heroCount: { fontSize: 48, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: -2 },
+  eyeBtn:    { padding: 4 },
+  startBtn:  { backgroundColor: C.dark, borderRadius: 50, paddingVertical: 15, alignItems: 'center' },
+  startTxt:  { fontSize: 15, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.white },
 
-  // Section headers
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle:  { fontSize: 18, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
-  sectionLink:   { fontSize: 14, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
+  sectionTitle:  { fontSize: 17, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  seeAll:        { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray },
 
-  // Cards carousel
-  cardsScroll:  { marginHorizontal: -20, marginBottom: 24 },
-  cardsContent: { paddingHorizontal: 20, gap: 14, paddingRight: 20 },
-
-  noteCard:     { width: 220, height: 132, borderRadius: 22, padding: 16, overflow: 'hidden', justifyContent: 'space-between' },
+  notesScrollWrap: { marginHorizontal: -20 },
+  notesScroll:  { gap: 14, paddingHorizontal: 20, paddingBottom: 24 },
+  noteCard:     { width: 280, height: 170, borderRadius: 26, padding: 20, overflow: 'hidden', justifyContent: 'space-between' },
   noteCardLime: { backgroundColor: C.lime },
   noteCardDark: { backgroundColor: C.dark },
+  ncTop:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  ncBottom:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  ncLogo:       { fontSize: 28, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  ncType:       { fontSize: 15, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
+  ncId:         { fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, marginTop: 3 },
+  detailsBtn:   { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.white, borderRadius: 50, paddingHorizontal: 14, paddingVertical: 9 },
+  detailsTxt:   { fontSize: 12, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
 
-  ncTop:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  ncLogo:     { fontSize: 22, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
-  ncVisaLbl:  { fontSize: 14, fontFamily: 'SpaceGrotesk_700Bold', color: '#555', letterSpacing: 1 },
-  ncBottom:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  ncType:      { fontSize: 12, fontFamily: 'SpaceGrotesk_500Medium', color: C.dark },
-  ncId:        { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, marginTop: 2 },
-  detailsBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.white, borderRadius: 50, paddingHorizontal: 11, paddingVertical: 6 },
-  detailsTxt:  { fontSize: 12, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
-
-  // Transaction list card
-  txCard:  { backgroundColor: C.white, borderRadius: 22, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 12, elevation: 3, marginBottom: 8 },
-  txRow:   { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 15 },
-  txBorder:{ borderBottomWidth: 1, borderBottomColor: C.bg },
-  txIcon:  { width: 46, height: 46, borderRadius: 14, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
-  txBody:  { flex: 1 },
-  txName:  { fontSize: 14, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
-  txTime:  { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.muted, marginTop: 2 },
-  txRight: { alignItems: 'flex-end', gap: 5 },
-  txAmt:   { fontSize: 14, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
-  cashPill:{ backgroundColor: C.lime, borderRadius: 50, paddingHorizontal: 9, paddingVertical: 3 },
-  cashTxt: { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: '#3a6e00' },
-
-  // Empty row inside tx card
+  txCard:       { backgroundColor: C.white, borderRadius: 22, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 12, elevation: 3, marginBottom: 8 },
+  txCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
+  txCardTitle:  { fontSize: 20, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  txRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 15 },
+  txBorder:   { borderBottomWidth: 1, borderBottomColor: C.bg },
+  txIcon:     { width: 46, height: 46, borderRadius: 14, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
+  txBody:     { flex: 1 },
+  txName:     { fontSize: 16, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  txTime:     { fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.muted, marginTop: 2 },
+  txRight:    { alignItems: 'flex-end', gap: 6 },
+  txDuration: { fontSize: 15, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  cashPill:   { backgroundColor: C.lime, borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
+  cashTxt:    { fontSize: 12, fontFamily: 'SpaceGrotesk_700Bold', color: '#3a6e00' },
   txEmptyRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 20 },
 });

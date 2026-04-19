@@ -116,8 +116,8 @@ const styles = StyleSheet.create({
 
   tabRow: {
     flexDirection: 'row',
-    height: 70,
-    marginTop: 14,
+    height: 60,
+    marginTop: 16,
     paddingHorizontal: 12,
   },
 
