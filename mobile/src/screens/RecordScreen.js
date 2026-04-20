@@ -358,10 +358,12 @@ export default function RecordScreen({ route, navigation }) {
       setStage(STAGE.DONE);
       // Navigate to SessionReview for manual editing
       navigation.navigate('SessionReview', {
-        session:     saved || { id: null },
+        session:       saved || { id: null },
         extracted,
         sessionRef,
-        patientName: routePatient?.name || patientName.trim() || null,
+        patientName:   routePatient?.name || patientName.trim() || null,
+        transcript:    correctedTranscript || transcript || null,
+        diarizedLines: diarizedLines.length > 0 ? diarizedLines : null,
       });
     } catch (e) {
       setErrMsg(e.message || 'AI processing failed.');

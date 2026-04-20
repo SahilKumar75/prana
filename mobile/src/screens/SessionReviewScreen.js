@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
+  TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, LayoutAnimation,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -105,21 +105,69 @@ function MedCard({ med, index, onChange, onRemove }) {
 }
 
 // ─── Section wrapper ──────────────────────────────────────────────────────────
-function Section({ icon, title, children, accent }) {
+function Section({ icon, title, children, accent, aiField }) {
   return (
     <View style={s.section}>
       <View style={[s.sectionHead, accent && { borderLeftColor: accent }]}>
         <Ionicons name={icon} size={15} color={C.dark} />
         <Text style={s.sectionTitle}>{title}</Text>
+        {aiField && (
+          <View style={s.aiBadge}>
+            <Ionicons name="sparkles-outline" size={10} color="#7c3aed" />
+            <Text style={s.aiBadgeTxt}>AI filled · tap to edit</Text>
+          </View>
+        )}
       </View>
       {children}
     </View>
   );
 }
 
+// ─── Collapsible transcript block ────────────────────────────────────────────
+function TranscriptBlock({ transcript, diarizedLines }) {
+  const [open, setOpen] = useState(false);
+  const toggle = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setOpen(v => !v);
+  };
+  if (!transcript && (!diarizedLines || diarizedLines.length === 0)) return null;
+  return (
+    <View style={s.txBlock}>
+      <TouchableOpacity style={s.txHeader} onPress={toggle} activeOpacity={0.8}>
+        <Ionicons name="mic-outline" size={15} color={C.dark} />
+        <Text style={s.txHeaderTxt}>Session Transcript</Text>
+        <View style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Text style={s.txSubTxt}>{open ? 'Hide' : 'View for reference'}</Text>
+          <Ionicons name={open ? 'chevron-up-outline' : 'chevron-down-outline'} size={14} color={C.gray} />
+        </View>
+      </TouchableOpacity>
+      {open && (
+        <View style={s.txBody}>
+          {diarizedLines && diarizedLines.length > 0
+            ? diarizedLines.map((line, i) => (
+                <View key={i} style={s.txLine}>
+                  <Text style={[s.txSpeaker,
+                    line.speaker === 'doctor'  && { color: '#1d4ed8' },
+                    line.speaker === 'patient' && { color: '#065f46' },
+                  ]}>{line.name || line.speaker}:</Text>
+                  <Text style={s.txLineText}>{line.text}</Text>
+                </View>
+              ))
+            : <Text style={s.txRaw}>{transcript}</Text>
+          }
+        </View>
+      )}
+    </View>
+  );
+}
+
 // ─── Main screen ─────────────────────────────────────────────────────────────
 export default function SessionReviewScreen({ route, navigation }) {
-  const { session, extracted: initialExtracted, sessionRef, patientName: initPatientName } = route.params;
+  const {
+    session, extracted: initialExtracted, sessionRef,
+    patientName: initPatientName, transcript: rawTranscript,
+    diarizedLines: initDiarizedLines,
+  } = route.params;
 
   const [fontsLoaded] = useFonts({
     SpaceGrotesk_400Regular, SpaceGrotesk_500Medium,
@@ -135,7 +183,7 @@ export default function SessionReviewScreen({ route, navigation }) {
   const [medications,     setMedications]     = useState(initialExtracted?.medications || []);
   const [followUp,        setFollowUp]        = useState(initialExtracted?.follow_up || '');
   const [summary,         setSummary]         = useState(initialExtracted?.summary || '');
-  const [notes,           setNotes]           = useState('');
+  const [notes,           setNotes]           = useState(initialExtracted?.doctor_notes || '');
   const [saving,          setSaving]          = useState(false);
 
   const sessionId = session?.id || sessionRef || '—';
@@ -208,6 +256,15 @@ export default function SessionReviewScreen({ route, navigation }) {
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ── AI banner ── */}
+          <View style={s.aiBanner}>
+            <Ionicons name="sparkles" size={14} color="#7c3aed" />
+            <Text style={s.aiBannerTxt}>Fields pre-filled by AI — review and correct any mistakes below</Text>
+          </View>
+
+          {/* ── Transcript reference ── */}
+          <TranscriptBlock transcript={rawTranscript} diarizedLines={initDiarizedLines} />
+
           {/* ── Session ID card ── */}
           <View style={s.idCard}>
             <View style={s.idRow}>
@@ -238,7 +295,7 @@ export default function SessionReviewScreen({ route, navigation }) {
           </View>
 
           {/* ── Diagnosis ── */}
-          <Section icon="medkit-outline" title="Diagnosis" accent="#93c5fd">
+          <Section icon="medkit-outline" title="Diagnosis" accent="#93c5fd" aiField={!!initialExtracted?.diagnosis}>
             <TextInput
               style={s.fieldInput}
               value={diagnosis}
@@ -250,7 +307,7 @@ export default function SessionReviewScreen({ route, navigation }) {
           </Section>
 
           {/* ── Severity ── */}
-          <Section icon="pulse-outline" title="Severity">
+          <Section icon="pulse-outline" title="Severity" aiField={!!initialExtracted?.severity}>
             <View style={s.sevRow}>
               {['mild', 'moderate', 'severe'].map(sv => (
                 <TouchableOpacity
@@ -268,7 +325,7 @@ export default function SessionReviewScreen({ route, navigation }) {
           </Section>
 
           {/* ── Symptoms ── */}
-          <Section icon="bandage-outline" title="Symptoms" accent="#86efac">
+          <Section icon="bandage-outline" title="Symptoms" accent="#86efac" aiField={initialExtracted?.symptoms?.length > 0}>
             <View style={s.chipWrap}>
               {symptoms.map((sym, i) => (
                 <Chip key={i} label={sym} onRemove={() => setSymptoms(prev => prev.filter((_, j) => j !== i))} />
@@ -292,7 +349,7 @@ export default function SessionReviewScreen({ route, navigation }) {
           </Section>
 
           {/* ── Medications ── */}
-          <Section icon="flask-outline" title="Medications" accent={C.lime}>
+          <Section icon="flask-outline" title="Medications" accent={C.lime} aiField={initialExtracted?.medications?.length > 0}>
             {medications.map((med, i) => (
               <MedCard key={i} med={med} index={i} onChange={updateMed} onRemove={removeMed} />
             ))}
@@ -303,7 +360,7 @@ export default function SessionReviewScreen({ route, navigation }) {
           </Section>
 
           {/* ── Follow-up ── */}
-          <Section icon="calendar-outline" title="Follow-up Instructions">
+          <Section icon="calendar-outline" title="Follow-up Instructions" aiField={!!initialExtracted?.follow_up}>
             <TextInput
               style={s.fieldInput}
               value={followUp}
@@ -315,7 +372,7 @@ export default function SessionReviewScreen({ route, navigation }) {
           </Section>
 
           {/* ── Summary ── */}
-          <Section icon="reader-outline" title="Clinical Summary">
+          <Section icon="reader-outline" title="Clinical Summary" aiField={!!initialExtracted?.summary}>
             <TextInput
               style={[s.fieldInput, { minHeight: 80 }]}
               value={summary}
@@ -406,4 +463,20 @@ const s = StyleSheet.create({
 
   confirmBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.lime, borderRadius: 18, paddingVertical: 16, marginTop: 8 },
   confirmTxt: { fontSize: 16, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+
+  aiBanner:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ede9fe', borderRadius: 14, padding: 12, marginBottom: 12 },
+  aiBannerTxt: { flex: 1, fontSize: 12, fontFamily: 'SpaceGrotesk_500Medium', color: '#5b21b6', lineHeight: 17 },
+
+  aiBadge:    { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#ede9fe', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3, marginLeft: 6 },
+  aiBadgeTxt: { fontSize: 10, fontFamily: 'SpaceGrotesk_500Medium', color: '#7c3aed' },
+
+  txBlock:     { backgroundColor: C.white, borderRadius: 18, marginBottom: 14, overflow: 'hidden' },
+  txHeader:    { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14 },
+  txHeaderTxt: { fontSize: 13, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  txSubTxt:    { fontSize: 11, fontFamily: 'SpaceGrotesk_400Regular', color: C.gray },
+  txBody:      { paddingHorizontal: 14, paddingBottom: 14, gap: 8, borderTopWidth: 1, borderTopColor: '#f2f3f5' },
+  txLine:      { flexDirection: 'row', gap: 6, flexWrap: 'wrap', paddingTop: 8 },
+  txSpeaker:   { fontSize: 12, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, minWidth: 70 },
+  txLineText:  { flex: 1, fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, lineHeight: 19 },
+  txRaw:       { fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, lineHeight: 20, paddingTop: 10 },
 });
