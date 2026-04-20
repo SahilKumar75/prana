@@ -184,9 +184,20 @@ export default function SessionReviewScreen({ route, navigation }) {
   const [followUp,        setFollowUp]        = useState(initialExtracted?.follow_up || '');
   const [summary,         setSummary]         = useState(initialExtracted?.summary || '');
   const [notes,           setNotes]           = useState(initialExtracted?.doctor_notes || '');
+  const [followUpRequired, setFollowUpRequired] = useState(initialExtracted?.follow_up_required || false);
   const [saving,          setSaving]          = useState(false);
 
   const sessionId = session?.id || sessionRef || '—';
+
+  // Compute which fields are missing (empty after AI extraction)
+  const missingFields = [
+    !diagnosis       && 'Diagnosis',
+    !severity        && 'Severity',
+    symptoms.length === 0 && 'Symptoms',
+    medications.length === 0 && 'Medications',
+    !followUp        && 'Follow-up',
+    !summary         && 'Summary',
+  ].filter(Boolean);
 
   const addMedication = () => {
     setMedications(prev => [...prev, {
@@ -208,15 +219,16 @@ export default function SessionReviewScreen({ route, navigation }) {
     try {
       const updatedData = {
         ...initialExtracted,
-        patient_name:     patientName  || null,
-        diagnosis:        diagnosis    || null,
-        severity:         severity     || null,
-        symptom_duration: symptomDuration || null,
+        patient_name:      patientName  || null,
+        diagnosis:         diagnosis    || null,
+        severity:          severity     || null,
+        symptom_duration:  symptomDuration || null,
         symptoms,
-        medications: medications.filter(m => m.name?.trim()),
-        follow_up:   followUp  || null,
-        summary:     summary   || null,
-        doctor_notes: notes    || null,
+        medications:       medications.filter(m => m.name?.trim()),
+        follow_up:         followUp  || null,
+        summary:           summary   || null,
+        doctor_notes:      notes     || null,
+        follow_up_required: followUpRequired,
       };
       await api.updateSession(session.id, { extracted_data: updatedData });
       navigation.reset({
@@ -261,6 +273,23 @@ export default function SessionReviewScreen({ route, navigation }) {
             <Ionicons name="sparkles" size={14} color="#7c3aed" />
             <Text style={s.aiBannerTxt}>Fields pre-filled by AI — review and correct any mistakes below</Text>
           </View>
+
+          {/* ── Missing fields warning ── */}
+          {missingFields.length > 0 && (
+            <View style={s.missingBox}>
+              <View style={s.missingHeader}>
+                <Ionicons name="alert-circle-outline" size={15} color="#b45309" />
+                <Text style={s.missingTitle}>Missing details — please fill in</Text>
+              </View>
+              <View style={s.missingChips}>
+                {missingFields.map(f => (
+                  <View key={f} style={s.missingChip}>
+                    <Text style={s.missingChipTxt}>{f}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
 
           {/* ── Transcript reference ── */}
           <TranscriptBlock transcript={rawTranscript} diarizedLines={initDiarizedLines} />
@@ -383,6 +412,24 @@ export default function SessionReviewScreen({ route, navigation }) {
             />
           </Section>
 
+          {/* ── Follow-up required toggle ── */}
+          <View style={s.fuToggleCard}>
+            <View style={s.fuToggleLeft}>
+              <Ionicons name="calendar-outline" size={18} color={followUpRequired ? '#3a6e00' : C.gray} />
+              <View>
+                <Text style={s.fuToggleTitle}>Follow-up Required</Text>
+                <Text style={s.fuToggleSub}>{followUpRequired ? 'Patient will see a “Request Follow-up” button' : 'No follow-up scheduled'}</Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[s.fuToggleBtn, followUpRequired && s.fuToggleBtnOn]}
+              onPress={() => setFollowUpRequired(v => !v)}
+              activeOpacity={0.8}
+            >
+              <View style={[s.fuToggleThumb, followUpRequired && s.fuToggleThumbOn]} />
+            </TouchableOpacity>
+          </View>
+
           {/* ── Doctor notes ── */}
           <Section icon="create-outline" title="Doctor Notes (private)">
             <TextInput
@@ -469,6 +516,22 @@ const s = StyleSheet.create({
 
   aiBadge:    { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#ede9fe', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3, marginLeft: 6 },
   aiBadgeTxt: { fontSize: 10, fontFamily: 'SpaceGrotesk_500Medium', color: '#7c3aed' },
+
+  missingBox:    { backgroundColor: '#fffbeb', borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#fde68a' },
+  missingHeader: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
+  missingTitle:  { fontSize: 13, fontFamily: 'SpaceGrotesk_700Bold', color: '#b45309' },
+  missingChips:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  missingChip:   { backgroundColor: '#fef3c7', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: '#fcd34d' },
+  missingChipTxt:{ fontSize: 12, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#92400e' },
+
+  fuToggleCard:  { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 18, padding: 16, marginBottom: 14, gap: 12 },
+  fuToggleLeft:  { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  fuToggleTitle: { fontSize: 14, fontFamily: 'SpaceGrotesk_700Bold', color: '#202020' },
+  fuToggleSub:   { fontSize: 11, fontFamily: 'SpaceGrotesk_400Regular', color: '#888888', marginTop: 2 },
+  fuToggleBtn:   { width: 48, height: 28, borderRadius: 14, backgroundColor: '#e5e7eb', justifyContent: 'center', paddingHorizontal: 3 },
+  fuToggleBtnOn: { backgroundColor: '#c9f158' },
+  fuToggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#ffffff', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 3, elevation: 2 },
+  fuToggleThumbOn: { alignSelf: 'flex-end' },
 
   txBlock:     { backgroundColor: C.white, borderRadius: 18, marginBottom: 14, overflow: 'hidden' },
   txHeader:    { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14 },

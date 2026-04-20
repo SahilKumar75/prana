@@ -217,7 +217,7 @@ export default function PatientHomeScreen({ navigation }) {
         <View style={s.header}>
           <View>
             <Text style={s.greeting}>{greeting}, {firstName}</Text>
-            <Text style={s.sub}>Find a doctor</Text>
+            <Text style={s.sub}>Your health, simplified</Text>
           </View>
           <View style={s.avatarBtn}>
             <Text style={s.avatarInitial}>{(profile?.name || 'P')[0]}</Text>
@@ -268,6 +268,48 @@ export default function PatientHomeScreen({ navigation }) {
             </Text>
           </View>
         )}
+
+        {/* FOLLOW-UP REQUIRED banners */}
+        {pastSessions
+          .filter(sess => sess.extracted_data?.follow_up_required)
+          .slice(0, 3)
+          .map(sess => {
+            const d = sess.extracted_data || {};
+            const alreadyRequested = requests.some(r =>
+              r.session_id === sess.id || r.status === 'pending'
+            );
+            return (
+              <View key={sess.id} style={s.fuBanner}>
+                <View style={s.fuBannerLeft}>
+                  <Ionicons name="calendar" size={18} color="#1d4ed8" />
+                  <View>
+                    <Text style={s.fuBannerTitle}>Follow-up recommended</Text>
+                    <Text style={s.fuBannerSub} numberOfLines={1}>
+                      {d.diagnosis || 'Consultation'}{d.follow_up ? `  ·  ${d.follow_up}` : ''}
+                    </Text>
+                  </View>
+                </View>
+                {alreadyRequested ? (
+                  <View style={s.fuRequestedPill}>
+                    <Text style={s.fuRequestedTxt}>Requested</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={s.fuRequestBtn}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      const doc = doctors.find(doc => doc.id === sess.doctor_id);
+                      if (doc) handleRequest(doc);
+                      else Alert.alert('Doctor unavailable', 'Please request a doctor from the list above.');
+                    }}
+                  >
+                    <Text style={s.fuRequestBtnTxt}>Request</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })
+        }
 
         {/* PAST VISITS */}
         <View style={[s.sectionHeader, { marginTop: 24 }]}>
@@ -320,6 +362,15 @@ const s = StyleSheet.create({
 
   acceptedBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.lime, borderRadius: 16, padding: 14, marginVertical: 8 },
   acceptedTxt:    { flex: 1, fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#3a6e00' },
+
+  fuBanner:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eff6ff', borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#bfdbfe', gap: 10 },
+  fuBannerLeft:   { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  fuBannerTitle:  { fontSize: 13, fontFamily: 'SpaceGrotesk_700Bold', color: '#1e3a8a' },
+  fuBannerSub:    { fontSize: 11, fontFamily: 'SpaceGrotesk_400Regular', color: '#3b82f6', marginTop: 2 },
+  fuRequestBtn:   { backgroundColor: '#1d4ed8', borderRadius: 50, paddingHorizontal: 14, paddingVertical: 8 },
+  fuRequestBtnTxt:{ fontSize: 12, fontFamily: 'SpaceGrotesk_700Bold', color: '#ffffff' },
+  fuRequestedPill:{ backgroundColor: '#e0e7ff', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 6 },
+  fuRequestedTxt: { fontSize: 12, fontFamily: 'SpaceGrotesk_500Medium', color: '#4338ca' },
 
   loadRow:  { alignItems: 'center', paddingVertical: 24 },
   emptyBox: { alignItems: 'center', paddingVertical: 32, gap: 6 },

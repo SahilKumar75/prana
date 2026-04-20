@@ -86,6 +86,7 @@ export const api = {
       .from('profiles')
       .select('*')
       .eq('role', 'doctor')
+      .neq('id', '00000000-0000-0000-0000-000000000002') // exclude demo seed doctor
       .order('name');
     if (error) throw new Error(error.message);
     return data || [];
