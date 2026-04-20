@@ -588,10 +588,11 @@ export default function RecordScreen({ route, navigation }) {
             {/* ── Layer 0: Deep ambient glow blobs behind the orb ─────────────── */}
             <Animated.View style={[s.orbGlowA, { opacity: glowOpacityA }]} />
             <Animated.View style={[s.orbGlowB, { opacity: glowOpacityB }]} />
+            <Animated.View style={[s.orbGlowC, { opacity: glowOpacityA }]} />
 
             {/* ── Layer 1: Always-on halo rings (slow idle → fast recording) ─── */}
-            <Animated.View style={haloStyle(haloRing1, '#f472b6')} />
-            <Animated.View style={haloStyle(haloRing2, '#a855f7')} />
+            <Animated.View style={haloStyle(haloRing1, '#f9a8d4')} />
+            <Animated.View style={haloStyle(haloRing2, '#fbcfe8')} />
 
             {/* ── Layer 2: Aggressive ripple rings — recording only ───────────── */}
             {isRecording && (
@@ -607,43 +608,43 @@ export default function RecordScreen({ route, navigation }) {
               s.voiceOrb,
               { transform: [{ scale: breatheAnim }, { translateY: floatY }] },
             ]}>
-              {/* Base: white → pale pink — light glass-marble foundation */}
+              {/* Base: warm white → light pink foundation */}
               <LinearGradient
-                colors={['#ffffff', '#fdf2f8', '#fce7f3']}
+                colors={['#ffffff', '#fff0f9', '#ffe4f4']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={StyleSheet.absoluteFillObject}
               />
-              {/* Rotating sweep 1 — hot pink / magenta arc (clockwise) */}
+              {/* Rotating sweep 1 — dominant hot pink / fuchsia arc (clockwise) */}
               <Animated.View style={[s.orbBlobWrap, { transform: [{ rotate: rot1 }] }]}>
                 <LinearGradient
-                  colors={['transparent', 'rgba(236,72,153,0.88)', 'rgba(255,80,200,0.72)', 'transparent']}
-                  start={{ x: 0.0, y: 0.1 }}
-                  end={{ x: 1.0, y: 0.9 }}
+                  colors={['transparent', 'rgba(255,50,160,0.95)', 'rgba(236,72,153,0.90)', 'rgba(255,100,200,0.75)', 'transparent']}
+                  start={{ x: 0.05, y: 0.0 }}
+                  end={{ x: 0.95, y: 1.0 }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 105 }]}
                 />
               </Animated.View>
-              {/* Rotating blob 2 — blue (counter-clockwise, lower-left sweep) */}
+              {/* Rotating blob 2 — soft periwinkle blue (left edge only, subtle) */}
               <Animated.View style={[s.orbBlobWrap, { transform: [{ rotate: rot2 }] }]}>
                 <View style={s.orbBlob2} />
               </Animated.View>
-              {/* Rotating sweep 3 — purple / violet arc (clockwise, offset) */}
+              {/* Rotating sweep 3 — warm fuchsia / light violet (clockwise, offset) */}
               <Animated.View style={[s.orbBlobWrap, { transform: [{ rotate: rot3 }] }]}>
                 <LinearGradient
-                  colors={['transparent', 'rgba(147,51,234,0.72)', 'rgba(168,85,247,0.55)', 'transparent']}
-                  start={{ x: 1.0, y: 0.0 }}
-                  end={{ x: 0.0, y: 1.0 }}
+                  colors={['transparent', 'rgba(240,100,220,0.68)', 'rgba(232,121,249,0.52)', 'transparent']}
+                  start={{ x: 1.0, y: 0.1 }}
+                  end={{ x: 0.0, y: 0.9 }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 105 }]}
                 />
               </Animated.View>
-              {/* Fixed white gloss streak — diagonal, creates glass-marble sheen */}
+              {/* Bright sweeping gloss arc — the key visual from reference image */}
               <LinearGradient
-                colors={['transparent', 'rgba(255,255,255,0.82)', 'rgba(255,255,255,0.55)', 'transparent']}
-                start={{ x: 0.15, y: 0.0 }}
-                end={{ x: 0.55, y: 1.0 }}
+                colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.70)', 'rgba(255,255,255,0.20)', 'transparent']}
+                start={{ x: 0.1, y: 0.0 }}
+                end={{ x: 0.6, y: 0.75 }}
                 style={StyleSheet.absoluteFillObject}
               />
-              {/* Very light vignette at edges — adds spherical depth */}
+              {/* Very light edge vignette — spherical depth */}
               <View style={s.orbFrost} />
               {/* Pulsing inner core — bright white radial burst */}
               <Animated.View style={[s.orbCore, { opacity: innerGlow }]} />
@@ -1137,28 +1138,35 @@ const s = StyleSheet.create({
   // Ambient glow blobs: large blurred soft circles behind the orb
   // opacity driven by glowPulse — hot pink + purple
   orbGlowA: {
-    position: 'absolute', top: 20, left: 20,
-    width: 260, height: 260, borderRadius: 130,
-    backgroundColor: '#ec4899',
-    shadowColor: '#ec4899', shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1, shadowRadius: 65, elevation: 0,
+    position: 'absolute', top: 25, left: 25,
+    width: 250, height: 250, borderRadius: 125,
+    backgroundColor: '#ff4da6',
+    shadowColor: '#ff4da6', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1, shadowRadius: 70, elevation: 0,
   },
   orbGlowB: {
-    position: 'absolute', top: 5, left: 5,
-    width: 290, height: 290, borderRadius: 145,
-    backgroundColor: '#9333ea',
-    shadowColor: '#c084fc', shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1, shadowRadius: 80, elevation: 0,
+    position: 'absolute', top: 10, left: 10,
+    width: 280, height: 280, borderRadius: 140,
+    backgroundColor: '#f472b6',
+    shadowColor: '#f9a8d4', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1, shadowRadius: 85, elevation: 0,
+  },
+  orbGlowC: {
+    position: 'absolute', top: 50, left: 0,
+    width: 120, height: 210, borderRadius: 80,
+    backgroundColor: '#818cf8',
+    shadowColor: '#818cf8', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45, shadowRadius: 40, elevation: 0,
   },
 
   // Main orb: white fallback, gradient applied via LinearGradient child
   voiceOrb: {
     width: 210, height: 210, borderRadius: 105,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fff0f9',
     overflow: 'hidden',
-    shadowColor: '#c026d3',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.55, shadowRadius: 42, elevation: 24,
+    shadowColor: '#ff4da6',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.50, shadowRadius: 38, elevation: 24,
   },
 
   // Wrapper: fills the orb so rotating it orbits blobs around the centre
@@ -1166,44 +1174,44 @@ const s = StyleSheet.create({
 
   // Blob 1 — (unused, replaced by LinearGradient sweeps)
   orbBlob1: { position: 'absolute', top: -65, left: -50, width: 240, height: 220, borderRadius: 120, backgroundColor: '#ec4899', opacity: 0 },
-  // Blob 2 — vivid blue (lower-left, counter-clockwise)
+  // Blob 2 — soft periwinkle (left edge, very subtle — matches reference blue tint)
   orbBlob2: {
-    position: 'absolute', bottom: -70, left: -60,
-    width: 250, height: 230, borderRadius: 125,
-    backgroundColor: '#3b82f6', opacity: 0.60,
+    position: 'absolute', top: 10, left: -90,
+    width: 200, height: 200, borderRadius: 100,
+    backgroundColor: '#a5b4fc', opacity: 0.42,
   },
   // Blob 3 — (unused, replaced by LinearGradient sweeps)
   orbBlob3: { position: 'absolute', top: 15, right: -75, width: 210, height: 185, borderRadius: 100, backgroundColor: '#9333ea', opacity: 0 },
 
-  // Edge vignette — very faint, adds spherical depth without darkening
+  // Edge vignette — very faint warm pink, adds spherical depth
   orbFrost: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    borderRadius: 105, backgroundColor: 'rgba(120,20,140,0.06)',
+    borderRadius: 105, backgroundColor: 'rgba(220,50,120,0.04)',
   },
 
-  // Inner core glow — pulsing bright white burst at centre
+  // Inner core glow — pulsing bright white burst (slightly larger for brightness)
   orbCore: {
-    position: 'absolute', top: 55, left: 55,
-    width: 100, height: 100, borderRadius: 50,
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    position: 'absolute', top: 45, left: 45,
+    width: 120, height: 120, borderRadius: 60,
+    backgroundColor: 'rgba(255,255,255,0.94)',
     shadowColor: '#ffffff',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1, shadowRadius: 48, elevation: 0,
+    shadowOpacity: 1, shadowRadius: 55, elevation: 0,
   },
 
-  // Rim light — thin pink-white border
+  // Rim light — thin bright pink-white border
   orbRim: {
     position: 'absolute', top: 1, left: 1,
     width: 208, height: 208, borderRadius: 104,
     borderWidth: 1.5,
-    borderColor: 'rgba(255,200,240,0.80)',
+    borderColor: 'rgba(255,180,230,0.90)',
   },
 
-  // Specular highlight — large top-left gloss blob (glass-marble reflection)
+  // Specular highlight — large top-left gloss blob (brighter in reference image)
   orbHighlight: {
-    position: 'absolute', top: 16, left: 22,
-    width: 100, height: 72, borderRadius: 50,
-    backgroundColor: 'rgba(255,255,255,0.48)',
+    position: 'absolute', top: 14, left: 18,
+    width: 115, height: 80, borderRadius: 55,
+    backgroundColor: 'rgba(255,255,255,0.60)',
   },
 
   // Spinner overlay
