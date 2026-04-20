@@ -4,7 +4,7 @@ import {
   ActivityIndicator, Alert, Animated, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
+import { useAudioRecorder, RecordingPresets, requestRecordingPermissionsAsync } from 'expo-audio';
 import { Ionicons } from '@expo/vector-icons';
 import {
   useFonts,
@@ -124,12 +124,13 @@ export default function RecordScreen() {
     setErrMsg(''); setResult(null); setTranscript('');
     setDetectedLang(null); setTimer(0);
     try {
-      const { granted } = await AudioModule.requestRecordingPermissionsAsync();
+      const { granted } = await requestRecordingPermissionsAsync();
       if (!granted) { Alert.alert('Permission needed', 'Microphone access is required.'); return; }
-      await audioRecorder.record();
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
       setStage(STAGE.RECORDING);
-    } catch {
-      setErrMsg('Could not start recording.'); setStage(STAGE.ERROR);
+    } catch (e) {
+      setErrMsg(e?.message || 'Could not start recording.'); setStage(STAGE.ERROR);
     }
   };
 
