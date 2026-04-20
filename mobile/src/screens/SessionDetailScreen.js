@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -13,6 +13,7 @@ import {
   SpaceGrotesk_600SemiBold,
   SpaceGrotesk_700Bold,
 } from '@expo-google-fonts/space-grotesk';
+import { translateTranscript, diarizeTranscript } from '../lib/groq';
 
 const C = {
   bg:    '#f2f3f5',
@@ -323,12 +324,9 @@ export default function SessionDetailScreen({ route, navigation }) {
           </TouchableOpacity>
         )}
 
-        {/* RAW TRANSCRIPT */}
-        {session.raw_transcript && (
-          <View style={s.transcriptCard}>
-            <Text style={s.transcriptLabel}>Raw Transcript</Text>
-            <Text style={s.transcriptText}>{session.raw_transcript}</Text>
-          </View>
+        {/* TRANSCRIPT */}
+        {(session.corrected_transcript || session.raw_transcript) && (
+          <TranscriptChat session={session} />
         )}
 
         <View style={{ height: 40 }} />
@@ -368,6 +366,148 @@ function VitalTile({ label, value, icon }) {
       <Ionicons name={icon} size={18} color={C.gray} />
       <Text style={s.vitalValue}>{value}</Text>
       <Text style={s.vitalLabel}>{label}</Text>
+    </View>
+  );
+}
+
+// ── Transcript helpers ──────────────────────────────────────────────────────
+function parseLines(text) {
+  if (!text?.trim()) return null;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const parsed = lines.map(line => {
+    const m = line.match(/^([^:]{1,40}):\s+(.+)/);
+    if (m) return { name: m[1].trim(), text: m[2].trim() };
+    return { name: null, text: line };
+  });
+  const named = parsed.filter(l => l.name !== null).length;
+  if (named < Math.max(1, Math.ceil(parsed.length * 0.4))) return null;
+  return parsed;
+}
+
+function TranscriptChat({ session }) {
+  const text = session.corrected_transcript || session.raw_transcript;
+  const detectedLang = (session.detected_language || session.language || 'en')
+    .replace('-IN', '').toLowerCase();
+
+  const [selectedLang,   setSelectedLang]   = useState('original');
+  const [translating,    setTranslating]    = useState(false);
+  const [cache,          setCache]          = useState({});
+  const [diarized,       setDiarized]       = useState(null);  // [{speaker,name,text}] after auto-diarize
+  const [diarizing,      setDiarizing]      = useState(false);
+
+  // Try to parse speaker labels already baked into corrected_transcript
+  const storedLines = useMemo(() => parseLines(text), [text]);
+
+  // On mount: if no stored labels, auto-diarize the raw transcript via LLM
+  useEffect(() => {
+    if (storedLines) return; // already labeled — skip
+    if (!text?.trim() || text.length < 60) return; // too short to diarize
+    const doctorName  = session.extracted_data?.doctor_name  || 'Doctor';
+    const patientName = session.patient_name || session.extracted_data?.patient_name || 'Patient';
+    setDiarizing(true);
+    diarizeTranscript(text, doctorName, patientName, detectedLang)
+      .then(lines => { if (lines?.length > 0) setDiarized(lines); })
+      .catch(() => {})
+      .finally(() => setDiarizing(false));
+  }, [text]);
+
+  // Use diarized lines (auto or stored), falling back to plain text
+  const rawLines = storedLines || diarized;
+
+  const langOpts = useMemo(() => {
+    const opts = [{ key: 'original', label: 'Original' }];
+    if (detectedLang !== 'en') opts.push({ key: 'en', label: 'EN' });
+    if (detectedLang !== 'hi') opts.push({ key: 'hi', label: '\u0939\u093f\u0902' });
+    return opts;
+  }, [detectedLang]);
+
+  const handleLang = async (lang) => {
+    if (lang === selectedLang) return;
+    setSelectedLang(lang);
+    if (lang === 'original' || cache[lang]) return;
+    setTranslating(true);
+    try {
+      const source = rawLines || [{ text }];
+      const results = await Promise.all(source.map(l => translateTranscript(l.text, lang)));
+      setCache(prev => ({ ...prev, [lang]: source.map((l, i) => ({ ...l, text: results[i] })) }));
+    } catch {
+      setSelectedLang('original');
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const activeLines = selectedLang === 'original'
+    ? rawLines
+    : (Array.isArray(cache[selectedLang]) ? cache[selectedLang] : rawLines);
+
+  if (!text) return null;
+
+  return (
+    <View style={s.txCard}>
+      <View style={s.txHeader}>
+        <Text style={s.txLabel}>Transcript</Text>
+        <View style={s.txLangRow}>
+          {langOpts.map(opt => (
+            <TouchableOpacity
+              key={opt.key}
+              style={[s.txLangPill, selectedLang === opt.key && s.txLangPillOn]}
+              onPress={() => handleLang(opt.key)}
+              disabled={translating}
+              activeOpacity={0.75}
+            >
+              <Text style={[s.txLangTxt, selectedLang === opt.key && s.txLangTxtOn]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          {translating && <ActivityIndicator size="small" color="#9333ea" style={{ marginLeft: 4 }} />}
+        </View>
+      </View>
+
+      {diarizing && !activeLines && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 }}>
+          <ActivityIndicator size="small" color={C.muted} />
+          <Text style={{ fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.muted }}>
+            Splitting speakers…
+          </Text>
+        </View>
+      )}
+
+      {activeLines ? (
+        <View style={{ gap: 10 }}>
+          {activeLines.map((line, i) => {
+            if (line.speaker === 'noise' || !line.text?.trim()) return null;
+            const isDoc = line.speaker === 'doctor' || !!line.name?.match(/^dr[\s.]/i);
+            return (
+              <View key={i} style={[s.msgOuter, { alignItems: isDoc ? 'flex-end' : 'flex-start' }]}>
+                <View style={s.msgInner}>
+                  {!isDoc && (
+                    <View style={[s.msgAvatar, s.msgAvatarPat]}>
+                      <Text style={s.msgAvatarTxt}>{(line.name || 'P')[0].toUpperCase()}</Text>
+                    </View>
+                  )}
+                  <View style={[s.msgContent, isDoc && s.msgContentDoc]}>
+                    {line.name && (
+                      <Text style={[s.msgSpeaker, isDoc && s.msgSpeakerDoc]}>{line.name}</Text>
+                    )}
+                    <View style={[s.msgBubble, isDoc ? s.msgBubbleDoc : s.msgBubblePat]}>
+                      <Text style={[s.msgBubbleTxt, isDoc && s.msgBubbleTxtDoc]}>{line.text}</Text>
+                    </View>
+                  </View>
+                  {isDoc && (
+                    <View style={[s.msgAvatar, s.msgAvatarDoc]}>
+                      <Ionicons name="medical-outline" size={11} color="#ffffff" />
+                    </View>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      ) : !diarizing && (
+        <Text style={s.txPlain}>{text}</Text>
+      )}
     </View>
   );
 }
@@ -423,9 +563,30 @@ const s = StyleSheet.create({
   missingRow:   { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   missingText:  { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#92400e', flex: 1, lineHeight: 19 },
 
-  transcriptCard:  { backgroundColor: C.white, borderRadius: 18, padding: 16, marginBottom: 8 },
-  transcriptLabel: { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
-  transcriptText:  { fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, lineHeight: 22 },
+  txCard:           { backgroundColor: C.white, borderRadius: 18, padding: 16, marginBottom: 8 },
+  txHeader:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  txLabel:          { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 0.8 },
+  txLangRow:        { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  txLangPill:       { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, backgroundColor: C.bg, borderWidth: 1, borderColor: '#ddd' },
+  txLangPillOn:     { backgroundColor: C.dark, borderColor: C.dark },
+  txLangTxt:        { fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.gray },
+  txLangTxtOn:      { color: C.white },
+  txPlain:          { fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, lineHeight: 22 },
+  msgOuter:         { width: '100%' },
+  msgInner:         { flexDirection: 'row', alignItems: 'flex-end', gap: 8, maxWidth: '85%' },
+  msgAvatar:        { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  msgAvatarPat:     { backgroundColor: '#e8e8e8' },
+  msgAvatarDoc:     { backgroundColor: C.dark },
+  msgAvatarTxt:     { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  msgContent:       { flex: 1, gap: 2, alignItems: 'flex-start' },
+  msgContentDoc:    { alignItems: 'flex-end' },
+  msgSpeaker:       { fontSize: 10, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.muted },
+  msgSpeakerDoc:    { textAlign: 'right' },
+  msgBubble:        { borderRadius: 14, paddingHorizontal: 13, paddingVertical: 9 },
+  msgBubbleDoc:     { backgroundColor: C.dark, borderBottomRightRadius: 3 },
+  msgBubblePat:     { backgroundColor: '#f0f0f2', borderBottomLeftRadius: 3 },
+  msgBubbleTxt:     { fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', lineHeight: 21, color: C.dark },
+  msgBubbleTxtDoc:  { color: C.white },
 
   rxBtn:      { backgroundColor: C.lime, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   rxBtnInner: { flexDirection: 'row', alignItems: 'center', gap: 14 },

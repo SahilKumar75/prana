@@ -474,7 +474,7 @@ export default function RecordScreen({ route, navigation }) {
       const extracted = await extractMedicalData(textForAI, language, contextHistory);
       const saved     = await api.saveSession({
         rawTranscript: transcript,
-        correctedTranscript: correctedTranscript || null,
+        correctedTranscript: labeledText || correctedTranscript || null,
         language,
         detectedLang,
         durationSecs,
