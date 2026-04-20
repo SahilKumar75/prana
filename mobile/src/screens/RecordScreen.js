@@ -29,15 +29,24 @@ const C = {
 };
 
 const LANGUAGES = [
+  { code: 'auto',  label: 'Auto'           },
   { code: 'hi-IN', label: '\u0939\u093f\u0928\u094d\u0926\u0940' },
   { code: 'mr-IN', label: '\u092e\u0930\u093e\u0920\u0940' },
-  { code: 'en-IN', label: 'English' },
+  { code: 'en-IN', label: 'English'        },
 ];
 
+// Map Whisper-returned language codes → display labels
 const LANG_LABEL = {
+  auto: 'Auto',
   hi: '\u0939\u093f\u0928\u094d\u0926\u0940', 'hi-IN': '\u0939\u093f\u0928\u094d\u0926\u0940',
   mr: '\u092e\u0930\u093e\u0920\u0940', 'mr-IN': '\u092e\u0930\u093e\u0920\u0940',
   en: 'English', 'en-IN': 'English',
+};
+
+// Whisper language code: 'auto' → undefined (let model detect), else strip region suffix
+const toWhisperLang = (code) => {
+  if (!code || code === 'auto') return undefined;
+  return code.split('-')[0]; // 'hi-IN' → 'hi', 'mr-IN' → 'mr', 'en-IN' → 'en'
 };
 
 const STAGE = { IDLE: 0, RECORDING: 1, TRANSCRIBING: 2, EXTRACTING: 3, DONE: 4, ERROR: 5 };
@@ -53,7 +62,7 @@ export default function RecordScreen() {
     SpaceGrotesk_700Bold,
   });
 
-  const [language,     setLanguage]     = useState('hi-IN');
+  const [language,     setLanguage]     = useState('auto');
   const [stage,        setStage]        = useState(STAGE.IDLE);
   const [timer,        setTimer]        = useState(0);
   const [transcript,   setTranscript]   = useState('');
@@ -161,7 +170,7 @@ export default function RecordScreen() {
       await audioRecorder.stop();
       const uri = audioRecorder.uri;
       if (!uri) throw new Error('No audio file found.');
-      const stt = await transcribeAudio(uri, language);
+      const stt = await transcribeAudio(uri, toWhisperLang(language));
       setTranscript(stt.text);
       setDetectedLang(stt.language);
       setDurationSecs(stt.duration || duration);
