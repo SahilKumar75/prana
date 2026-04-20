@@ -37,7 +37,7 @@ import {
   SpaceGrotesk_600SemiBold,
   SpaceGrotesk_700Bold,
 } from '@expo-google-fonts/space-grotesk';
-import { transcribeAudio, extractMedicalData, translateTranscript, diarizeTranscript, correctTranscript, buildLabeledTranscript } from '../lib/groq';
+import { transcribeAudio, transcribeSegments, extractMedicalData, translateTranscript, diarizeTranscript, correctTranscript, buildLabeledTranscript } from '../lib/groq';
 import { api } from '../lib/api';
 import CaseSelectModal from '../components/CaseSelectModal';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -117,6 +117,14 @@ export default function RecordScreen({ route, navigation }) {
 
   // Corrected transcript (post-processing layer)
   const [correctedTranscript, setCorrectedTranscript] = useState('');
+
+  // ─── Multi-language recording segments ────────────────────────────────────
+  // audioSegments: completed clips from earlier segments [{uri, lang}]
+  // activeSegLang: language selected for the currently-recording segment
+  // showSegLangPicker: shows inline language switch sheet during recording
+  const [audioSegments,     setAudioSegments]     = useState([]);
+  const [activeSegLang,     setActiveSegLang]      = useState(language);
+  const [showSegLangPicker, setShowSegLangPicker]  = useState(false);
 
   // Patient timeline context — sessions the doctor added from the timeline screen
   const [timelineContext, setTimelineContext] = useState([]);
@@ -343,6 +351,8 @@ export default function RecordScreen({ route, navigation }) {
   const startRecording = async () => {
     setErrMsg(''); setResult(null); setTranscript('');
     setDetectedLang(null); setTimer(0);
+    setAudioSegments([]);               // clear any previous segments
+    setActiveSegLang(language);         // first segment uses the pre-selected language
     try {
       const { granted } = await requestRecordingPermissionsAsync();
       if (!granted) { Alert.alert('Permission needed', 'Microphone access is required.'); return; }
@@ -355,24 +365,65 @@ export default function RecordScreen({ route, navigation }) {
     }
   };
 
+  // ─── Mid-recording language switch ────────────────────────────────────────
+  // Saves the current audio clip, shows the language picker, then
+  // starts a fresh recording clip in the newly selected language.
+  const switchLanguageSegment = async () => {
+    try {
+      await audioRecorder.stop();
+      const uri = audioRecorder.uri;
+      if (uri) {
+        setAudioSegments(prev => [...prev, { uri, lang: activeSegLang }]);
+      }
+      setShowSegLangPicker(true);
+    } catch (e) {
+      console.warn('[Recording] switchLanguageSegment error:', e.message);
+    }
+  };
+
+  const confirmSegmentLanguage = async (newLang) => {
+    setActiveSegLang(newLang);
+    setShowSegLangPicker(false);
+    try {
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+    } catch (e) {
+      setErrMsg('Could not restart recording: ' + e.message);
+      setStage(STAGE.ERROR);
+    }
+  };
+
   const stopAndTranscribe = async () => {
     const duration = timer;
     setStage(STAGE.TRANSCRIBING);
     try {
       await audioRecorder.stop();
       const uri = audioRecorder.uri;
-      if (!uri) throw new Error('No audio file found.');
-      // Pass full language code (e.g. 'hi-IN') so the STT router can pick the
-      // right provider. toWhisperLang() would strip it to 'hi' and break routing.
-      const stt = await transcribeAudio(uri, language === 'auto' ? 'auto' : language);
+      if (!uri && audioSegments.length === 0) throw new Error('No audio file found.');
+
+      // Build the full list of segments to transcribe
+      const allSegments = [
+        ...audioSegments,
+        ...(uri ? [{ uri, lang: activeSegLang }] : []),
+      ];
+
+      // Multi-segment path (language was switched mid-recording)
+      // Single-segment path (normal flow — same behaviour as before)
+      const stt = allSegments.length > 1
+        ? await transcribeSegments(allSegments)
+        : await transcribeAudio(allSegments[0].uri, allSegments[0].lang === 'auto' ? 'auto' : allSegments[0].lang);
+
       setTranscript(stt.text);
       setDetectedLang(stt.language);
       setDurationSecs(stt.duration || duration);
       // Correction pass — run on raw STT text (before diarization)
+      // If multiple language segments were used, signal 'multilingual' so
+      // correctTranscript doesn't force a single-language correction pass.
       setStage(STAGE.CORRECTING);
+      const corrLang = allSegments.length > 1 ? 'multilingual' : stt.language;
       let corrected = stt.text;
       try {
-        corrected = await correctTranscript(stt.text, stt.language);
+        corrected = await correctTranscript(stt.text, corrLang);
         setCorrectedTranscript(corrected);
       } catch (_) {
         setCorrectedTranscript(stt.text);
@@ -383,7 +434,8 @@ export default function RecordScreen({ route, navigation }) {
         setIsDiarizing(true);
         try {
           const lines = await diarizeTranscript(
-            corrected, routeDoctor.name, routePatient.name, stt.language
+            corrected, routeDoctor.name, routePatient.name,
+            allSegments.length > 1 ? 'multilingual' : stt.language
           );
           setDiarizedLines(
             lines
@@ -458,6 +510,7 @@ export default function RecordScreen({ route, navigation }) {
     setTranscript(''); setDetectedLang(null);
     setResult(null); setErrMsg(''); setTimer(0);
     setDiarizedLines([]); setIsDiarizing(false); setTranslatedLines({}); setCorrectedTranscript(''); setTimelineContext([]);
+    setAudioSegments([]); setActiveSegLang(language); setShowSegLangPicker(false);
     setPatientName(routePatient?.name || '');
     setPatientId(routePatient?.id   || '');
     // Don't reset case — stay in the same case context
@@ -633,6 +686,58 @@ export default function RecordScreen({ route, navigation }) {
               <Text style={s.doneHintNew}>Session saved ✓</Text>
             ) : (
               <Text style={s.tapHintNew}>Tap to begin session</Text>
+            )}
+
+            {/* ── Language switch pill — visible only while recording ── */}
+            {isRecording && (
+              <View style={s.segLangRow}>
+                {audioSegments.length > 0 && (
+                  <Text style={s.segCountLabel}>{audioSegments.length + 1} clips</Text>
+                )}
+                <TouchableOpacity
+                  style={s.segLangPill}
+                  onPress={switchLanguageSegment}
+                  activeOpacity={0.75}
+                >
+                  <Ionicons name="language-outline" size={13} color="#9333ea" />
+                  <Text style={s.segLangPillText}>
+                    {LANG_LABEL[activeSegLang] || 'Auto'}
+                  </Text>
+                  <Ionicons name="swap-horizontal-outline" size={13} color="#9333ea" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* ── Post-transcription detected language badge ── */}
+            {!isRecording && !isBusy && detectedLang && (
+              <View style={s.detectedLangBadge}>
+                <Ionicons name="mic-outline" size={11} color="#a855f7" />
+                <Text style={s.detectedLangText}>
+                  Detected: {LANG_LABEL[detectedLang] || detectedLang}
+                  {audioSegments.length > 0 ? ` · ${audioSegments.length + 1} clips merged` : ''}
+                </Text>
+              </View>
+            )}
+
+            {/* ── Inline segment language picker (shown after tap on pill) ── */}
+            {showSegLangPicker && (
+              <View style={s.segPickerSheet}>
+                <Text style={s.segPickerTitle}>Switch to language</Text>
+                <View style={s.segPickerRow}>
+                  {LANGUAGES.map(l => (
+                    <TouchableOpacity
+                      key={l.code}
+                      style={[s.segPickerChip, activeSegLang === l.code && s.segPickerChipActive]}
+                      onPress={() => confirmSegmentLanguage(l.code)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[s.segPickerChipText, activeSegLang === l.code && s.segPickerChipTextActive]}>
+                        {l.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
             )}
           </View>
         </View>
@@ -1116,6 +1221,33 @@ const s = StyleSheet.create({
   tapHintNew:  { fontSize: 14, fontFamily: 'SpaceGrotesk_500Medium', color: '#c084fc' },
   statusHintNew:{ fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#9333ea' },
   doneHintNew: { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#9333ea' },
+
+  // ── Language switch pill (visible during recording) ────────────────────────
+  segLangRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 10 },
+  segCountLabel: { fontSize: 11, fontFamily: 'SpaceGrotesk_500Medium', color: '#a855f7' },
+  segLangPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(147,51,234,0.08)', borderWidth: 1, borderColor: 'rgba(147,51,234,0.25)',
+    borderRadius: 50, paddingHorizontal: 13, paddingVertical: 7,
+  },
+  segLangPillText: { fontSize: 12, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#9333ea' },
+
+  // ── Detected language badge (post-transcription) ───────────────────────────
+  detectedLangBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, justifyContent: 'center', marginTop: 6 },
+  detectedLangText:  { fontSize: 11, fontFamily: 'SpaceGrotesk_400Regular', color: '#a855f7' },
+
+  // ── Inline segment language picker ────────────────────────────────────────
+  segPickerSheet: {
+    marginTop: 12, backgroundColor: 'rgba(253,242,248,0.95)',
+    borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14,
+    borderWidth: 1, borderColor: 'rgba(147,51,234,0.18)',
+  },
+  segPickerTitle: { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: '#9333ea', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10, textAlign: 'center' },
+  segPickerRow:   { flexDirection: 'row', gap: 8, justifyContent: 'center' },
+  segPickerChip:  { borderRadius: 50, paddingHorizontal: 14, paddingVertical: 7, backgroundColor: '#f5f5f5', borderWidth: 1, borderColor: '#e0e0e0' },
+  segPickerChipActive: { backgroundColor: '#9333ea', borderColor: '#9333ea' },
+  segPickerChipText:   { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#555' },
+  segPickerChipTextActive: { color: '#fff' },
 
   fieldLabel:      { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
   transcriptCard:   { backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12 },

@@ -26,11 +26,7 @@ const C = {
   muted: '#bbbbbe',
 };
 
-const DUMMY_SESSIONS = [
-  { id: 'd1', patient_name: 'Priya Patel',     extracted_data: { diagnosis: 'Viral fever' },          created_at: new Date(Date.now() - 1*60*60*1000).toISOString(), status: 'processed' },
-  { id: 'd2', patient_name: 'Rahul Deshmukh',  extracted_data: { diagnosis: 'Follow-up check' },      created_at: new Date(Date.now() - 3*60*60*1000).toISOString(), status: 'processed' },
-  { id: 'd3', patient_name: 'Anonymous',        extracted_data: { diagnosis: 'Chest congestion' },     created_at: new Date(Date.now() - 6*60*60*1000).toISOString(), status: 'pending'   },
-];
+
 
 const statusMeta = {
   processed: { color: '#3a6e00', bg: '#c9f158' },
@@ -226,6 +222,12 @@ export default function DashboardScreen({ navigation }) {
 
   const handleStartSession = (req) => {
     setBellOpen(false);
+    // Mark the request completed immediately when the doctor taps Start session.
+    // This removes the patient from "Onboarded patients" right away instead of
+    // waiting for processWithAI to finish (which may never run if the doctor
+    // navigates back without saving the session).
+    api.completeRequest(req.id).catch(() => {});
+    setAcceptedPatients((prev) => prev.filter((r) => r.id !== req.id));
     navigation.navigate('Record', {
       patientProfile:   req.patient,
       sessionRequestId: req.id,
@@ -362,8 +364,13 @@ export default function DashboardScreen({ navigation }) {
               <ActivityIndicator size="small" color={C.muted} />
               <Text style={{ fontSize: 13, color: C.muted, fontFamily: 'SpaceGrotesk_400Regular' }}>Loading...</Text>
             </View>
+          ) : recentSessions.length === 0 ? (
+            <View style={s.txEmptyRow}>
+              <Ionicons name="document-text-outline" size={18} color={C.muted} />
+              <Text style={{ fontSize: 13, color: C.muted, fontFamily: 'SpaceGrotesk_400Regular' }}>No sessions recorded yet</Text>
+            </View>
           ) : (
-            (recentSessions.length > 0 ? recentSessions : DUMMY_SESSIONS).map((sess, i, arr) => {
+            recentSessions.map((sess, i, arr) => {
               const meta   = statusMeta[sess.status] || statusMeta.pending;
               const isLast = i === arr.length - 1;
               return (

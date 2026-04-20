@@ -5,13 +5,15 @@ const GROQ_BASE = 'https://api.groq.com/openai/v1';
 // Map Expo language codes → Whisper language codes
 const LANG_MAP = { 'hi-IN': 'hi', 'mr-IN': 'mr', 'en-IN': 'en', hi: 'hi', mr: 'mr', en: 'en' };
 
-// Seed prompts in the target language — strongly biases Whisper to output in that script
+// Seed prompts in the target language — strongly biases Whisper to output in that script.
+// Including common Indian drug names / dosage patterns in the prompt biases Whisper
+// to recognise them correctly instead of transcribing them as random words.
 const LANG_PROMPT = {
   // Starts with explicit Devanagari script instruction — prevents Whisper from using Urdu/Nastaliq
-  hi: 'देवनागरी लिपि में लिखें। यह हिंदी में डॉक्टर और मरीज़ के बीच चिकित्सा परामर्श है। दवाओं, लक्षणों और निदान का उल्लेख हो सकता है। देवनागरी लिपि में लिखें।',
-  mr: 'देवनागरी लिपि वापरा। हे डॉक्टर आणि रुग्ण यांच्यातील मराठी वैद्यकीय संभाषण आहे। औषधे, लक्षणे आणि निदानाचा उल्लेख असू शकतो।',
-  en: 'Medical consultation between doctor and patient. May include drug names, symptoms, and diagnosis.',
-  default: 'Medical consultation between doctor and patient. May include Hindi, Marathi, or English terms.',
+  hi: 'देवनागरी लिपि में लिखें। यह हिंदी में डॉक्टर और मरीज़ के बीच चिकित्सा परामर्श है। दवाएँ: Paracetamol, Dolo, Crocin, Combiflam, Augmentin, Azithromycin, Metformin, Pantoprazole, Omeprazole, Cetirizine, Amoxicillin, Ciprofloxacin, Metronidazole, Ondansetron, Atorvastatin, Amlodipine, Telmisartan. खुराक: BD, TDS, OD, SOS, mg, एक गोली, दो गोलियाँ।',
+  mr: 'देवनागरी लिपि वापरा। हे डॉक्टर आणि रुग्ण यांच्यातील मराठी वैद्यकीय संभाषण आहे। औषधे: Paracetamol, Dolo, Crocin, Combiflam, Augmentin, Azithromycin, Metformin, Pantoprazole, Cetirizine, Amoxicillin. मात्रा: BD, TDS, OD, SOS, mg.',
+  en: 'Medical consultation between doctor and patient. Drug names: Paracetamol, Dolo 650, Crocin, Combiflam, Augmentin 625, Azithromycin 500mg, Metformin 500mg, Pantoprazole 40mg, Pan-D, Cetirizine 10mg, Amoxicillin 500mg, Ciprofloxacin 500mg, Metronidazole 400mg, Ondansetron 4mg, Atorvastatin 10mg, Amlodipine 5mg, Telmisartan 40mg, Montelukast 10mg. Dose: BD, TDS, OD, SOS, HS.',
+  default: 'Medical consultation. Hindi, Marathi, or English. Drug names: Paracetamol, Dolo, Combiflam, Augmentin, Azithromycin, Metformin, Pantoprazole, Cetirizine, Amoxicillin, Ciprofloxacin, Metronidazole, Ondansetron, Atorvastatin, Amlodipine, Telmisartan.',
 };
 
 const MEDICAL_PROMPT = `You are a strict clinical transcription parser for Indian hospitals. Your ONLY job is to extract information EXPLICITLY STATED in the transcript. You are NOT a doctor. You do NOT suggest, infer, or fill typical values.
@@ -69,8 +71,29 @@ Return ONLY valid JSON. No markdown, no explanation, no text outside the JSON.
   "severity": "mild or moderate or severe — ONLY if doctor stated it; else null"
 }
 
-Indian drug name mappings (use ONLY when brand name was spoken):
-Crocin/Dolo → Paracetamol | Combiflam → Ibuprofen+Paracetamol | Pan/Pantop → Pantoprazole | Augmentin → Amoxicillin+Clavulanate | Asthalin → Salbutamol | Becosules → B-complex`;
+Indian drug brand → generic reference (use ONLY when a brand name was explicitly spoken):
+Paracetamol family: Crocin / Dolo / Calpol → Paracetamol
+Combination analgesics: Combiflam → Ibuprofen+Paracetamol | Hifenac-P → Aceclofenac+Paracetamol
+NSAIDs: Brufen / Ibugesic → Ibuprofen | Voveran / Voltaren / Dicloran → Diclofenac | Hifenac / Zerodol / Movon → Aceclofenac
+PPI / antacids: Pan / Pantop / Pantocid / Nexpro / Nexito → Pantoprazole | Omez / Prilosec → Omeprazole | Nexium → Esomeprazole | Rantac / Zinetac → Ranitidine | Digene / Gelusil → Antacid
+Antibiotics (penicillin): Augmentin / Clavam / Amoxyclav → Amoxicillin+Clavulanate | Mox / Amoxil → Amoxicillin
+Antibiotics (macrolide): Azithral / Azee / Azimax / Zithromax → Azithromycin | Erythrocin → Erythromycin
+Antibiotics (fluoroquinolone): Ciplox / Cifran → Ciprofloxacin | Norflox → Norfloxacin | Levoflox → Levofloxacin
+Antibiotics (cephalosporin): Monocef → Ceftriaxone | Taxim / Taxim-O → Cefotaxime / Cefpodoxime | Zifi → Cefixime | Macpod → Cefpodoxime | Zinnat / Ceftum → Cefuroxime
+Antibiotics (other): Metrogyl / Flagyl → Metronidazole | Fasigyn → Tinidazole
+Bronchodilators: Asthalin / Ventorlin → Salbutamol | Seroflo / Foracort → Salmeterol+Fluticasone | Duolin → Ipratropium+Salbutamol
+Antihistamines: Allegra / Telfast → Fexofenadine | Cetirizine / Okacet / Alerid → Cetirizine | Levocet / L-Cin → Levocetirizine | Montair / Singulair → Montelukast
+Antiemetics: Domperidone / Domstal / Domperi → Domperidone | Vomikind / Zofran → Ondansetron | Perinorm → Metoclopramide
+ORS / vitamins: Electral → ORS | Becosules → B-complex | Zincovit / Supradyn → Multivitamin+Zinc | Shelcal / Calcirol → Calcium+Vitamin D
+Diabetes: Glycomet / Glucophage / Obimet → Metformin | Januvia → Sitagliptin | Galvus → Vildagliptin | Jardiance → Empagliflozin | Forxiga → Dapagliflozin | Glimestar / Amaryl-M → Glimepiride+Metformin
+Insulin: Mixtard / Novomix → Biphasic insulin | Lantus / Basalog → Insulin glargine | Novorapid → Insulin aspart
+Antihypertensives: Telma / Telmikind → Telmisartan | Telma-H → Telmisartan+HCTZ | Amlodac / Amlokind / Amlopres → Amlodipine | Losar → Losartan | Concor → Bisoprolol | Aten → Atenolol | Betaloc / Metolar → Metoprolol
+Lipid-lowering: Storvas / Atorva / Lipvas → Atorvastatin | Rozucor / Roseday → Rosuvastatin
+Antiplatelet: Ecosprin → Aspirin | Clopilet / Plavix → Clopidogrel | Deplatt-A → Aspirin+Clopidogrel | Ecosprin AV → Aspirin+Atorvastatin
+Steroids: Wysolone / Omnacortil → Prednisolone | Medrol / Depo-Medrol → Methylprednisolone
+Antiepileptics: Levipil → Levetiracetam | Tegrital → Carbamazepine | Valprol / Encorate → Valproate | Eptoin → Phenytoin
+Muscle relaxants: Tizan → Tizanidine | Myospas → Thiocolchicoside
+Neuropsychiatric: Nexito / Rexipra / Cipralex → Escitalopram | Alprax / Restyl → Alprazolam`;
 
 
 // ─── Build speaker-labeled transcript from diarized lines ─────────────────────
@@ -89,7 +112,10 @@ export function buildLabeledTranscript(lines) {
 // terms, and ambiguous regional speech. Returns corrected plain text.
 export async function correctTranscript(rawText, detectedLang = 'en') {
   if (!rawText?.trim()) return rawText;
-  const langHint = { hi: 'Hindi', mr: 'Marathi', en: 'English' }[detectedLang] || 'mixed';
+  const isMultilingual = detectedLang === 'auto' || detectedLang === 'multilingual';
+  const langHint = isMultilingual
+    ? 'mixed Hindi/Marathi/English (code-switched)'
+    : ({ hi: 'Hindi', mr: 'Marathi', en: 'English' }[detectedLang] || 'mixed');
   const res = await fetch(`${GROQ_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY}` },
@@ -99,14 +125,49 @@ export async function correctTranscript(rawText, detectedLang = 'en') {
       messages: [
         {
           role:    'system',
-          content: `You are a medical transcription correction engine for Indian hospitals. You receive raw ASR (Whisper) output from a doctor-patient consultation in ${langHint} (or code-switched). Your job:
+          content: `You are a medical transcription correction engine for Indian hospitals. You receive raw ASR (Whisper) output from a doctor-patient consultation in ${langHint}. Your job:
 
-1. Fix misheard drug names (e.g. "Paracetamole" → "Paracetamol", "Pantaprazole" → "Pantoprazole", "Combiflame" → "Combiflam")
-2. Fix dosages written ambiguously (e.g. "five hundred mg" → "500mg", "twice" → "twice daily")  
-3. Fix misheard medical terms (e.g. "high pertension" → "hypertension", "diebetes" → "diabetes")
-4. Preserve original language — do NOT translate. If Hindi/Marathi sentence, keep it in Hindi/Marathi.
-5. Remove filler sounds (um, uh, hmm) but preserve all medical content
-6. Do NOT add or invent any medical information not present in the original
+1. Fix misheard drug names using this reference:
+   Paracetamol: "Paracetamole" "Paracitamol" "Para tamol" → Paracetamol
+   Pantoprazole: "Pantaprazole" "Panto prazole" "Pantopratsol" → Pantoprazole
+   Combiflam: "Combiflame" "Combi flame" "Kombiflem" → Combiflam
+   Augmentin: "Augmanton" "Og mentin" "Augmentine" → Augmentin
+   Azithromycin: "Azithro mycin" "Azithromicin" "Azi thromycin" → Azithromycin
+   Metformin: "Met formin" "Metformine" → Metformin
+   Cetirizine: "Setirizine" "Cetarizine" "Cetirizin" → Cetirizine
+   Ciprofloxacin: "Cipro floxacin" "Cyprofloxacin" → Ciprofloxacin
+   Metronidazole: "Metro nidazole" "Metranidazole" → Metronidazole
+   Ondansetron: "Ondansatron" "Ondansetrone" → Ondansetron
+   Atorvastatin: "Atorvastine" "Ator wastatin" → Atorvastatin
+   Amlodipine: "Amlo dipine" "Amlodipene" → Amlodipine
+   Telmisartan: "Telmi sartan" "Telmisartane" → Telmisartan
+   Montelukast: "Monte lukast" "Montelukaste" → Montelukast
+
+2. Expand dose abbreviations to full English phrases (preserve original language around them):
+   BD / B.D / bd → twice daily
+   TDS / T.D.S / tds → three times daily
+   OD / O.D / od → once daily
+   SOS / S.O.S / sos → as needed
+   HS / H.S / hs → at bedtime
+   QID / Q.I.D → four times daily
+   AC / a.c → before meals
+   PC / p.c → after meals
+   STAT / stat → immediately
+   PRN / p.r.n → as needed
+
+3. Fix dosage written ambiguously:
+   "five hundred mg" → "500mg" | "two fifty mg" → "250mg"
+   "twice" alone (in dosage context) → "twice daily"
+
+4. Fix misheard medical terms:
+   "high pertension" → "hypertension" | "diebetes" → "diabetes"
+   "pnemonia" → "pneumonia" | "bronkitis" → "bronchitis"
+   "artritis" → "arthritis" | "colestrol" → "cholesterol"
+   "tyfoid" "typhoid fever" → "typhoid"
+
+5. Preserve original language — do NOT translate. If Hindi/Marathi sentence, keep it in Hindi/Marathi.
+6. Remove filler sounds (um, uh, hmm) but preserve all medical content.
+7. Do NOT add or invent any medical information not present in the original.
 
 Return ONLY the corrected transcript text. No explanation, no prefix, no markdown.`,
         },
@@ -314,7 +375,31 @@ export async function processAudio(audioUri, languageCode = 'hi-IN') {
   };
 }
 
-// ─── Speaker Diarization ─────────────────────────────────────────────────────
+// ─── Multi-segment transcription (for language-switched recordings) ───────────
+// Accepts [{uri, lang}] — transcribes each segment with its declared language,
+// then merges into a single transcript string separated by newlines.
+// Returns the same shape as transcribeAudio() so callers treat it uniformly.
+export async function transcribeSegments(segments) {
+  if (!segments || segments.length === 0) throw new Error('No segments provided');
+  // Transcribe all segments in parallel
+  const results = await Promise.all(
+    segments.map(seg => transcribeAudio(seg.uri, seg.lang || 'auto').catch(err => {
+      console.warn('[STT] Segment failed, skipping:', err.message);
+      return { text: '', language: 'en', duration: 0, segments: [] };
+    }))
+  );
+  const mergedText     = results.map(r => r.text).filter(Boolean).join('\n');
+  const totalDuration  = results.reduce((sum, r) => sum + (r.duration || 0), 0);
+  // Primary language = first segment's detected language
+  const primaryLang    = results.find(r => r.language)?.language || 'en';
+  return {
+    text:     mergedText,
+    language: primaryLang,
+    duration: totalDuration,
+    segments: results.flatMap(r => r.segments || []),
+  };
+}
+
 // Runs on the CORRECTED transcript for best accuracy.
 // Returns [{speaker: 'doctor'|'patient'|'noise', name: string, text: string}]
 export async function diarizeTranscript(rawText, doctorName, patientName, detectedLang) {
@@ -329,34 +414,63 @@ export async function diarizeTranscript(rawText, doctorName, patientName, detect
       messages: [
         {
           role:    'system',
-          content: `You are a speaker diarization engine specialized in Indian doctor-patient medical consultations. The conversation may be in Hindi, Marathi, English, or code-switched.
+          content: `You are an expert speaker diarization engine for Indian doctor-patient medical consultations. The conversation may be in Hindi, Marathi, English, or heavily code-switched (Hinglish / Marglish). Your accuracy directly affects patient safety.
 
-Doctor speech patterns (assign to "doctor"):
-- Asks diagnostic questions: "kab se hai?", "koi allergy toh nahi?", "BP check karte hain"
-- Prescribes medications with dosage + frequency + duration: "Paracetamol 500mg twice daily for 5 days"
-- Gives clinical instructions: "rest karo", "pani zyada piyo", "kal wapas aao"
-- States diagnosis: "ye viral fever hai", "upper respiratory infection"
-- Uses clinical terms: "BP", "SPO2", "X-ray", "CBC", "prescription"
+━━━ DOCTOR SPEECH SIGNALS (assign speaker="doctor") ━━━
+Diagnostic questions:
+  "kab se hai?", "kab se ho raha hai?", "kitne din se?", "kya takleef hai?", "aur koi problem?"
+  "BP kaisa hai?", "sugar check kari?", "X-ray karaya?", "CBC kiya tha?"
+  "Koi allergy toh nahi?", "pehle koi bimari?", "family history?"
+Prescription language (STRONGEST SIGNAL — always doctor):
+  ANY utterance with "mg", "tablet", "capsule", "twice daily", "BD", "TDS", "OD", "SOS"
+  ANY utterance naming a drug + dose + frequency or duration
+  "Paracetamol 500mg twice daily for 5 days", "Pantoprazole 40mg OD"
+  "ye dawayi lo", "ye tablet lo", "injection lagenge", "drip lagaao"
+Instructions / follow-up:
+  "rest karo", "pani zyada piyo", "kal wapas aao", "ek hafte mein dekhte hain"
+  "bland diet lo", "tel-mirch band karo", "khana khane ke baad lo"
+Diagnosis:
+  "ye viral fever hai", "upper respiratory infection", "BP high hai", "diabetes confirm hai"
+  "infection hai", "ulcer lag raha hai", "X-ray normal hai"
+Clinical terms (almost always doctor):
+  "BP", "SPO2", "pulse", "temperature", "CBC", "LFT", "KFT", "ECG", "X-ray", "USG", "MRI"
+  "prescription", "refer karta hoon", "specialist ko dikhao"
+Marathi doctor patterns:
+  "किती दिवसांपासून आहे?", "औषध घ्या", "दोन वेळा घ्या", "उद्या परत या"
 
-Patient speech patterns (assign to "patient"):
-- Reports symptoms in first person: "mujhe dard hai", "bukhar aa raha hai", "weakness feel ho rahi hai"
-- Describes duration: "teen din se", "kal raat se", "subah se"
-- Gives answers: "haan", "nahi", pain scale numbers
-- Mentions history/allergies: "pehle bhi hua tha", "koi allergy nahi"
+━━━ PATIENT SPEECH SIGNALS (assign speaker="patient") ━━━
+Symptom reports (STRONGEST SIGNAL — always patient):
+  "mujhe dard hai", "sir dard hai", "pet mein dard", "sine mein dard"
+  "bukhar aa raha hai", "bukhar hai", "tez bukhar hai"
+  "khansi ho rahi hai", "saans nahi aa rahi", "naak beh raha hai"
+  "weakness feel ho rahi hai", "thakaan hai", "chakkar aa rahe hain"
+  "ulti aayi", "dast ho rahe hain", "bhookh nahi lag rahi"
+Duration phrases (always patient describing their own symptoms):
+  "teen din se", "2 din se", "kal raat se", "subah se", "ek hafte se"
+  "pichle mahine se", "kuch dino se"
+Agreement / answers to doctor questions:
+  "haan", "nahi", "ji", "haan doctor sahib", "theek hai doctor"
+  Pain scale: "5 number ka dard", "bahut tez dard"
+History / allergies:
+  "pehle bhi hua tha", "koi allergy nahi", "BP ki dawayi leta hoon"
+Marathi patient patterns:
+  "मला दुखत आहे", "ताप आहे", "थकवा आहे", "तीन दिवसांपासून"
 
-Rules:
-1. Split into individual speaker turns — each turn is one array entry
-2. A long monologue should be split at natural question-answer boundaries
-3. Preserve the EXACT original language of each utterance — do NOT translate
-4. Label "noise" only for truly inaudible content — omit coughs/silence
-5. If uncertain: default "doctor" for prescriptions, "patient" for symptom complaints
+━━━ CRITICAL RULES ━━━
+1. NEVER assign a medication prescription line to "patient" — prescriptions are always doctor.
+2. NEVER assign symptom complaints ("mujhe dard hai", "bukhar hai") to "doctor".
+3. A single utterance may switch language mid-sentence — classify by CONTENT, not language.
+4. Split long blocks into individual speaker turns at natural boundaries.
+5. If a block mixes doctor Q and patient A (common in rushed transcripts), split them.
+6. Preserve EXACT original text — do NOT translate, correct spelling, or paraphrase.
+7. Label "noise" only for truly inaudible content — NOT for coughs, door sounds, or short pauses.
 
-Return ONLY valid JSON: {"lines": [{"speaker": "doctor"|"patient"|"noise", "name": "<actual name>", "text": "<utterance>"}]}
+Return ONLY valid JSON: {"lines": [{"speaker": "doctor"|"patient"|"noise", "name": "<actual name>", "text": "<exact utterance>"}]}
 No markdown, no explanation.`,
         },
         {
           role:    'user',
-          content: `Doctor: ${doctorName}. Patient: ${patientName}. Language: ${detectedLang || 'mixed Hindi/English'}.\n\nTranscript:\n${rawText}`,
+          content: `Doctor name: ${doctorName}. Patient name: ${patientName}. Language: ${detectedLang || 'mixed Hindi/English'}.\n\nTranscript:\n${rawText}`,
         },
       ],
     }),

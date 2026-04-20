@@ -186,14 +186,58 @@ export const api = {
       .order('created_at', { ascending: false });
     if (error) throw new Error(error.message);
     const requests = data || [];
+    if (requests.length === 0) return [];
+
     const patientIds = [...new Set(requests.map((r) => r.patient_id))];
-    if (patientIds.length === 0) return [];
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('*')
-      .in('id', patientIds);
-    const profileMap = Object.fromEntries((profiles || []).map((p) => [p.id, p]));
-    return requests.map((r) => ({ ...r, patient: enrichPatient(profileMap[r.patient_id]) }));
+    const requestIds  = requests.map((r) => r.id);
+
+    const [profilesRes, sessionsByRequestId, sessionsByDoctorRes] = await Promise.all([
+      supabase.from('profiles').select('*').in('id', patientIds),
+      // Check 1: session explicitly linked by request_id
+      supabase
+        .from('sessions')
+        .select('request_id')
+        .eq('doctor_id', doctorId)
+        .in('request_id', requestIds),
+      // Check 2: ALL sessions by this doctor — we'll cross-ref by patient_name
+      // because sessions.patient_id stores patientDbId ('PAT-PRIY-3210'),
+      // not the profile UUID stored in session_requests.patient_id
+      supabase
+        .from('sessions')
+        .select('patient_name')
+        .eq('doctor_id', doctorId)
+        .not('patient_name', 'is', null),
+    ]);
+
+    const profileMap = Object.fromEntries((profilesRes.data || []).map((p) => [p.id, p]));
+    const completedByRequestId = new Set(
+      (sessionsByRequestId.data || []).map((s) => s.request_id)
+    );
+    // Build a set of lower-cased patient names that already have sessions with this doctor
+    const sessionPatientNames = new Set(
+      (sessionsByDoctorRes.data || []).map((s) => s.patient_name?.toLowerCase()).filter(Boolean)
+    );
+
+    const isStale = (r) => {
+      if (completedByRequestId.has(r.id)) return true;
+      const profileName = profileMap[r.patient_id]?.name?.toLowerCase();
+      return profileName ? sessionPatientNames.has(profileName) : false;
+    };
+
+    // Silently fix stale rows in the background
+    const stale = requests.filter(isStale);
+    if (stale.length > 0) {
+      supabase
+        .from('session_requests')
+        .update({ status: 'completed' })
+        .in('id', stale.map((r) => r.id))
+        .then(() => {})
+        .catch(() => {});
+    }
+
+    return requests
+      .filter((r) => !isStale(r))
+      .map((r) => ({ ...r, patient: enrichPatient(profileMap[r.patient_id]) }));
   },
 
   acceptRequest: async (requestId) => {
