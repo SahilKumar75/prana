@@ -27,9 +27,9 @@ const C = {
 };
 
 const DUMMY_SESSIONS = [
-  { id: 'd1', language: 'Patient Consultation', created_at: new Date(Date.now() - 1*60*60*1000).toISOString(), status: 'processed', icon: 'person-outline',        lang: 'hi-IN', duration: '4 min' },
-  { id: 'd2', language: 'Follow-up Note',       created_at: new Date(Date.now() - 3*60*60*1000).toISOString(), status: 'processed', icon: 'document-text-outline', lang: 'en-IN', duration: '2 min' },
-  { id: 'd3', language: 'Discharge Summary',    created_at: new Date(Date.now() - 6*60*60*1000).toISOString(), status: 'pending',   icon: 'clipboard-outline',     lang: 'hi-IN', duration: '7 min' },
+  { id: 'd1', patient_name: 'Priya Patel',     extracted_data: { diagnosis: 'Viral fever' },          created_at: new Date(Date.now() - 1*60*60*1000).toISOString(), status: 'processed' },
+  { id: 'd2', patient_name: 'Rahul Deshmukh',  extracted_data: { diagnosis: 'Follow-up check' },      created_at: new Date(Date.now() - 3*60*60*1000).toISOString(), status: 'processed' },
+  { id: 'd3', patient_name: 'Anonymous',        extracted_data: { diagnosis: 'Chest congestion' },     created_at: new Date(Date.now() - 6*60*60*1000).toISOString(), status: 'pending'   },
 ];
 
 const statusMeta = {
@@ -374,16 +374,20 @@ export default function DashboardScreen({ navigation }) {
                   onPress={() => navigation.navigate('SessionDetail', { session: sess })}
                 >
                   <View style={s.txIcon}>
-                    <Ionicons name={sess.icon || 'mic-outline'} size={22} color={C.dark} />
+                    <Ionicons name="person-outline" size={22} color={C.dark} />
                   </View>
                   <View style={s.txBody}>
-                    <Text style={s.txName}>{sess.language || 'Voice Note'}</Text>
-                    <Text style={s.txTime}>{fmtTime(sess.created_at)}</Text>
+                    <Text style={s.txName} numberOfLines={1}>
+                      {sess.patient_name || sess.extracted_data?.patient_name || 'Anonymous'}
+                    </Text>
+                    <Text style={s.txTime}>
+                      {(sess.extracted_data?.diagnosis) || fmtTime(sess.created_at)}
+                    </Text>
                   </View>
                   <View style={s.txRight}>
-                    <Text style={s.txDuration}>{sess.duration || '3 min'}</Text>
+                    <Text style={s.txDuration}>{fmtTime(sess.created_at)}</Text>
                     <View style={[s.cashPill, { backgroundColor: meta.bg }]}>
-                      <Text style={[s.cashTxt, { color: meta.color }]}>{sess.lang || 'hi-IN'}</Text>
+                      <Text style={[s.cashTxt, { color: meta.color }]}>{sess.status || 'pending'}</Text>
                     </View>
                   </View>
                 </TouchableOpacity>

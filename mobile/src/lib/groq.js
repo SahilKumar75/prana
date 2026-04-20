@@ -49,10 +49,8 @@ Medication rules:
 For missing_info: flag anything clinically critical not mentioned — allergy history, vitals, diagnosis confirmation, medication dosage, duration of illness.`;
 
 // ─── Build speaker-labeled transcript from diarized lines ─────────────────────
-// Converts [{speaker, name, text}] → "Dr. Arjun: ...
-Priya: ..."
-// This is the KEY step: passing labeled text to extractMedicalData dramatically
-// improves symptom/prescription attribution accuracy.
+// Converts [{speaker, name, text}] → "Dr. Arjun: ...\nPriya: ..."
+// KEY step: passing labeled text to extractMedicalData improves attribution.
 export function buildLabeledTranscript(lines) {
   if (!lines || lines.length === 0) return '';
   return lines

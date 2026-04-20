@@ -11,7 +11,8 @@ import RecordScreen        from '../screens/RecordScreen';
 import HistoryScreen       from '../screens/HistoryScreen';
 import SettingsScreen      from '../screens/SettingsScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
-import SessionDetailScreen from '../screens/SessionDetailScreen';
+import SessionDetailScreen    from '../screens/SessionDetailScreen';
+import PatientTimelineScreen  from '../screens/PatientTimelineScreen';
 import RoleSelectScreen    from '../screens/RoleSelectScreen';
 
 import PatientHomeScreen    from '../screens/patient/PatientHomeScreen';
@@ -125,12 +126,14 @@ export default function AppNavigator() {
         ) : role === 'doctor' ? (
           <>
             <Stack.Screen name="MainTabs"      component={DoctorTabs}          />
-            <Stack.Screen name="SessionDetail" component={SessionDetailScreen} />
+            <Stack.Screen name="SessionDetail"     component={SessionDetailScreen}    />
+            <Stack.Screen name="PatientTimeline"   component={PatientTimelineScreen}  />
           </>
         ) : (
           <>
-            <Stack.Screen name="MainTabs"      component={PatientTabs}         />
-            <Stack.Screen name="SessionDetail" component={SessionDetailScreen} />
+            <Stack.Screen name="MainTabs"           component={PatientTabs}            />
+            <Stack.Screen name="SessionDetail"      component={SessionDetailScreen}    />
+            <Stack.Screen name="PatientTimeline"    component={PatientTimelineScreen}  />
           </>
         )}
       </Stack.Navigator>

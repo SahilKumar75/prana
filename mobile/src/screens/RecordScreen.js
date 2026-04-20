@@ -79,7 +79,7 @@ const STAGE = { IDLE: 0, RECORDING: 1, TRANSCRIBING: 2, DIARIZING: 3, CORRECTING
 const fmtTimer = (s) =>
   `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-export default function RecordScreen({ route }) {
+export default function RecordScreen({ route, navigation }) {
   // Pre-filled context when coming from a patient card
   const routePatient    = route?.params?.patientProfile   || null;
   const routeDoctor     = route?.params?.doctorProfile    || null;
@@ -116,6 +116,9 @@ export default function RecordScreen({ route }) {
 
   // Corrected transcript (post-processing layer)
   const [correctedTranscript, setCorrectedTranscript] = useState('');
+
+  // Patient timeline context — sessions the doctor added from the timeline screen
+  const [timelineContext, setTimelineContext] = useState([]);
 
   // Generate a stable session reference ID for this recording session
   const sessionRef = useRef((() => {
@@ -328,7 +331,9 @@ export default function RecordScreen({ route }) {
         ? buildLabeledTranscript(diarizedLines)
         : null;
       const textForAI = labeledText || correctedTranscript || transcript;
-      const extracted = await extractMedicalData(textForAI, language, isFollowUp ? caseHistory : []);
+      // Pass case history for follow-up visits (RAG); also include any manually-added timeline context
+      const contextHistory = isFollowUp ? caseHistory : (timelineContext.length > 0 ? timelineContext : []);
+      const extracted = await extractMedicalData(textForAI, language, contextHistory);
       const saved     = await api.saveSession({
         rawTranscript: transcript,
         correctedTranscript: correctedTranscript || null,
@@ -357,7 +362,7 @@ export default function RecordScreen({ route }) {
     setStage(STAGE.IDLE);
     setTranscript(''); setDetectedLang(null);
     setResult(null); setErrMsg(''); setTimer(0);
-    setDiarizedLines([]); setIsDiarizing(false); setTranslatedLines({}); setCorrectedTranscript('');
+    setDiarizedLines([]); setIsDiarizing(false); setTranslatedLines({}); setCorrectedTranscript(''); setTimelineContext([]);
     setPatientName(routePatient?.name || '');
     setPatientId(routePatient?.id   || '');
     // Don't reset case — stay in the same case context
@@ -486,15 +491,26 @@ export default function RecordScreen({ route }) {
         {(hasTranscript || (!isDone && stage === STAGE.IDLE)) && (
           <View style={s.transcriptCard}>
 
-            {/* Pink patient header — top of card when patient context exists */}
+            {/* Yellow patient header — tappable to open patient timeline */}
             {routePatient && (
-              <View style={s.fusedPatientBanner}>
+              <TouchableOpacity
+                style={s.fusedPatientBanner}
+                activeOpacity={0.8}
+                onPress={() => navigation.navigate('PatientTimeline', {
+                  patient: routePatient,
+                  selectedSessions: timelineContext,
+                  onUpdateContext: (sessions) => setTimelineContext(sessions),
+                })}
+              >
                 <View style={s.ctxIconWrap}>
                   <Ionicons name="person-circle-outline" size={20} color={C.dark} />
                 </View>
                 <View style={s.ctxBody}>
                   <Text style={s.ctxLabel}>{activeCaseType ? (isFollowUp ? 'Follow-up' : 'New case') : 'Patient'}</Text>
                   <Text style={s.ctxName}>{routePatient.name}</Text>
+                  {timelineContext.length > 0 && (
+                    <Text style={s.ctxContextHint}>{timelineContext.length} past visit{timelineContext.length > 1 ? 's' : ''} in context</Text>
+                  )}
                   {activeCaseType ? (
                     <Text style={s.ctxCaseType}>{activeCaseType}</Text>
                   ) : null}
@@ -502,8 +518,9 @@ export default function RecordScreen({ route }) {
                 <View style={s.ctxRight}>
                   <Text style={s.ctxTime}>{new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</Text>
                   <Text style={s.ctxDate}>{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</Text>
+                  <Ionicons name="chevron-forward" size={14} color={C.dark} style={{ marginTop: 4 }} />
                 </View>
-              </View>
+              </TouchableOpacity>
             )}
 
             {/* Card header: Transcript label + detected lang + translation pills */}
@@ -824,7 +841,8 @@ const s = StyleSheet.create({
 
   ctxBanner:   { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FBBF24', borderRadius: 18, padding: 14, marginBottom: 16 },
   fusedPatientBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FBBF24', padding: 14 },
-  ctxCaseType: { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, opacity: 0.65, marginTop: 2 },
+  ctxCaseType:    { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, opacity: 0.65, marginTop: 2 },
+  ctxContextHint: { fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#3a6e00', marginTop: 2 },
   ctxIconWrap: { width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.08)', alignItems: 'center', justifyContent: 'center' },
   ctxBody:     { flex: 1 },
   ctxLabel:    { fontSize: 11, fontFamily: 'SpaceGrotesk_500Medium', color: C.dark, opacity: 0.7 },
