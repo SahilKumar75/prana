@@ -5,6 +5,14 @@ const GROQ_BASE = 'https://api.groq.com/openai/v1';
 // Map Expo language codes → Whisper language codes
 const LANG_MAP = { 'hi-IN': 'hi', 'mr-IN': 'mr', 'en-IN': 'en', hi: 'hi', mr: 'mr', en: 'en' };
 
+// Seed prompts in the target language — strongly biases Whisper to output in that script
+const LANG_PROMPT = {
+  hi: 'डॉक्टर और मरीज़ के बीच चिकित्सा परामर्श। दवाओं, लक्षणों और निदान का उल्लेख हो सकता है।',
+  mr: 'डॉक्टर आणि रुग्ण यांच्यातील वैद्यकीय सल्लामसलत। औषधे, लक्षणे आणि निदानाचा उल्लेख असू शकतो।',
+  en: 'Medical consultation between doctor and patient. May include drug names, symptoms, and diagnosis.',
+  default: 'Medical consultation between doctor and patient. May include Hindi, Marathi, or English terms.',
+};
+
 const MEDICAL_PROMPT = `You are a clinical AI assistant for Indian hospitals. A doctor-patient consultation transcript is given (may be Hindi, Marathi, English, or code-switched mid-sentence). Extract ALL clinical information and return ONLY a valid JSON object — no markdown, no explanation.
 
 JSON structure (use null for missing fields, empty array [] for missing lists):
@@ -27,8 +35,10 @@ For missing_info: flag anything clinically critical that was not mentioned — e
 For medications: capture ALL drugs, even if mentioned by Indian brand names or colloquially.`;
 
 // ─── Whisper Speech-to-Text ───────────────────────────────────────────────────
-export async function transcribeAudio(audioUri, languageCode = 'hi-IN') {
-  const lang = LANG_MAP[languageCode] || 'hi';
+export async function transcribeAudio(audioUri, languageCode) {
+  // languageCode is undefined for Auto — omit the language param so Whisper auto-detects
+  const lang   = languageCode ? (LANG_MAP[languageCode] || languageCode) : undefined;
+  const prompt = LANG_PROMPT[lang] || LANG_PROMPT.default;
 
   const formData = new FormData();
   formData.append('file', {
@@ -37,13 +47,9 @@ export async function transcribeAudio(audioUri, languageCode = 'hi-IN') {
     name: 'recording.m4a',
   });
   formData.append('model', 'whisper-large-v3-turbo');
-  formData.append('language', lang);
+  if (lang) formData.append('language', lang); // omit entirely for auto-detect
   formData.append('response_format', 'verbose_json');
-  // Prompt hints the model about medical domain + code-switching
-  formData.append(
-    'prompt',
-    'Medical consultation between doctor and patient. May include drug names, symptoms, diagnosis in Hindi, Marathi, or English.'
-  );
+  formData.append('prompt', prompt);
 
   const res = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
     method:  'POST',
