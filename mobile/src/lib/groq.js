@@ -93,8 +93,8 @@ export async function correctTranscript(rawText, detectedLang = 'en') {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY}` },
     body: JSON.stringify({
-      model:       'llama-3.3-70b-versatile',
-      temperature: 0.1,
+      model:       'deepseek-r1-distill-llama-70b',
+      temperature: 0,
       messages: [
         {
           role:    'system',
@@ -115,7 +115,11 @@ Return ONLY the corrected transcript text. No explanation, no prefix, no markdow
   });
   if (!res.ok) throw new Error(`Correction failed: ${await res.text()}`);
   const data = await res.json();
-  return data.choices[0].message.content?.trim() || rawText;
+  // Strip deepseek-r1 <think> block if present
+  const corrected = data.choices[0].message.content
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim();
+  return corrected || rawText;
 }
 
 // ─── Whisper Speech-to-Text ───────────────────────────────────────────────────
@@ -177,7 +181,7 @@ export async function extractMedicalData(transcript, languageCode = 'hi-IN', cas
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model:           'llama-3.3-70b-versatile',
+      model:           'deepseek-r1-distill-llama-70b',
       temperature:     0,
       response_format: { type: 'json_object' },
       messages: [
@@ -196,7 +200,8 @@ export async function extractMedicalData(transcript, languageCode = 'hi-IN', cas
   }
 
   const data    = await res.json();
-  const content = data.choices[0].message.content;
+  // deepseek-r1 prepends <think>...</think> reasoning — strip before parsing JSON
+  const content = data.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
   let parsed;
   try {
