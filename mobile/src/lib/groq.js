@@ -93,7 +93,7 @@ export async function correctTranscript(rawText, detectedLang = 'en') {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY}` },
     body: JSON.stringify({
-      model:       'deepseek-r1-distill-llama-70b',
+      model:       'llama-3.3-70b-versatile',
       temperature: 0,
       messages: [
         {
@@ -228,7 +228,7 @@ export async function extractMedicalData(transcript, languageCode = 'hi-IN', cas
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model:           'deepseek-r1-distill-llama-70b',
+      model:           'llama-3.3-70b-versatile',
       temperature:     0,
       response_format: { type: 'json_object' },
       messages: [
