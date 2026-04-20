@@ -315,9 +315,10 @@ export default function RecordScreen({ route, navigation }) {
         }
       }
       setStage(STAGE.IDLE);
-    } catch {
+    } catch (e) {
+      console.error('[STT] stopAndTranscribe error:', e?.message, e);
       setStage(STAGE.IDLE);
-      setErrMsg('Auto-transcription failed — type manually and process.');
+      setErrMsg(`Transcription failed: ${e?.message || 'Unknown error'}. You can type the transcript manually.`);
     }
   };
 

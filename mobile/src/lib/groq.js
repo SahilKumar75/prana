@@ -128,50 +128,14 @@ const DEEPGRAM_KEY  = process.env.EXPO_PUBLIC_DEEPGRAM_API_KEY;
 const SARVAM_KEY    = process.env.EXPO_PUBLIC_SARVAM_API_KEY;
 
 // ─── STT routing strategy ─────────────────────────────────────────────────────
-// mr-IN  → Sarvam (saarika:v2) — best Marathi ASR, purpose-built for Indian regional speech
-// hi-IN  → Deepgram nova-3-medical — strong Hindi medical vocabulary + smart_format
-// en-IN  → Deepgram nova-3-medical — most accurate English medical ASR
-// auto   → Deepgram (auto language detection) → fallback Groq Whisper on error
-// Any failure at primary → falls through to Groq Whisper as safety net
-
-async function transcribeWithDeepgram(audioUri, languageCode) {
-  // Map to Deepgram language codes; undefined = auto-detect
-  const langMap = { 'hi-IN': 'hi', 'en-IN': 'en-IN', hi: 'hi', en: 'en-IN' };
-  const lang    = languageCode ? (langMap[languageCode] || 'hi') : undefined;
-
-  const params = new URLSearchParams({
-    model:        'nova-3-medical',
-    punctuate:    'true',
-    smart_format: 'true',
-    diarize:      'false',
-  });
-  if (lang) params.set('language', lang);
-
-  // React Native cannot fetch() a local file:// URI — must use FormData
-  const formData = new FormData();
-  formData.append('audio', {
-    uri:  audioUri,
-    type: 'audio/m4a',
-    name: 'recording.m4a',
-  });
-
-  const res = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
-    method:  'POST',
-    headers: { Authorization: `Token ${DEEPGRAM_KEY}` },
-    body:    formData,
-  });
-
-  if (!res.ok) throw new Error(`Deepgram STT failed: ${await res.text()}`);
-  const data       = await res.json();
-  const alt        = data.results?.channels?.[0]?.alternatives?.[0];
-  const detectedLang = data.results?.channels?.[0]?.detected_language || lang || 'en';
-  return {
-    text:     alt?.transcript || '',
-    language: detectedLang,
-    duration: data.metadata?.duration || 0,
-    segments: [],
-  };
-}
+// mr-IN  → Sarvam saarika:v2  (best Marathi ASR)
+// hi-IN  → Groq Whisper       (reliable, FormData-based, handles Hindi well)
+// en-IN  → Groq Whisper       (reliable)
+// auto   → Groq Whisper       (auto language detect)
+//
+// Deepgram WebSocket streaming is used for real-time interim display (future).
+// Deepgram REST is NOT used from React Native — it requires raw binary body
+// which cannot be sent via fetch() with a local file:// URI.
 
 async function transcribeWithSarvam(audioUri, languageCode) {
   const formData = new FormData();
@@ -190,7 +154,7 @@ async function transcribeWithSarvam(audioUri, languageCode) {
     body:    formData,
   });
 
-  if (!res.ok) throw new Error(`Sarvam STT failed: ${await res.text()}`);
+  if (!res.ok) throw new Error(`Sarvam STT failed (${res.status}): ${await res.text()}`);
   const data = await res.json();
   return {
     text:     data.transcript || '',
@@ -202,39 +166,45 @@ async function transcribeWithSarvam(audioUri, languageCode) {
 
 async function transcribeWithWhisper(audioUri, languageCode) {
   // Accept both full codes ('hi-IN') and short codes ('hi') — strip region suffix for Whisper
-  const shortCode = languageCode ? languageCode.split('-')[0] : undefined;
+  const shortCode = languageCode && languageCode !== 'auto' ? languageCode.split('-')[0] : undefined;
   const lang   = shortCode ? (LANG_MAP[shortCode] || shortCode) : undefined;
   const prompt = lang ? LANG_PROMPT[lang] : undefined;
+
   const formData = new FormData();
   formData.append('file', { uri: audioUri, type: 'audio/m4a', name: 'recording.m4a' });
   formData.append('model', 'whisper-large-v3-turbo');
   if (lang)   formData.append('language', lang);
   if (prompt) formData.append('prompt',   prompt);
   formData.append('response_format', 'verbose_json');
+
   const res = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
     method:  'POST',
     headers: { Authorization: `Bearer ${GROQ_KEY}` },
     body:    formData,
   });
-  if (!res.ok) throw new Error(`Whisper STT failed: ${await res.text()}`);
+  if (!res.ok) throw new Error(`Whisper STT failed (${res.status}): ${await res.text()}`);
   const data = await res.json();
-  return { text: data.text || '', language: data.language || lang, duration: data.duration || 0, segments: data.segments || [] };
+  return {
+    text:     data.text || '',
+    language: data.language || lang || 'en',
+    duration: data.duration || 0,
+    segments: data.segments || [],
+  };
 }
 
-// ─── Main STT entry point (routes to best provider, falls back to Whisper) ───
+// ─── Main STT entry point ─────────────────────────────────────────────────────
 export async function transcribeAudio(audioUri, languageCode) {
-  // Marathi → Sarvam saarika:v2 (best regional Indian language support)
+  // Marathi → Sarvam (best regional support); fallback to Whisper
   if (languageCode === 'mr-IN' || languageCode === 'mr') {
-    try { return await transcribeWithSarvam(audioUri, languageCode); } catch (_) {
-      console.warn('[STT] Sarvam failed, falling back to Whisper'); }
+    try {
+      return await transcribeWithSarvam(audioUri, languageCode);
+    } catch (e) {
+      console.warn('[STT] Sarvam failed, falling back to Whisper:', e.message);
+    }
   }
-  // English / Hindi / Auto → Deepgram nova-3-medical
-  if (!languageCode || languageCode === 'auto' || languageCode?.startsWith('hi') || languageCode?.startsWith('en')) {
-    try { return await transcribeWithDeepgram(audioUri, languageCode === 'auto' ? undefined : languageCode); } catch (_) {
-      console.warn('[STT] Deepgram failed, falling back to Whisper'); }
-  }
-  // Safety fallback: Groq Whisper (covers all other languages too)
+  // All others → Groq Whisper (FormData, works reliably with local file:// URIs)
   return transcribeWithWhisper(audioUri, languageCode);
+}
 }
 
 
