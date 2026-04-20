@@ -41,7 +41,7 @@ export default function PatientHistoryScreen({ navigation }) {
     if (!profile?.id) return;
     setOffline(false);
     try {
-      const data = await api.getPatientSessions(profile.id);
+      const data = await api.getPatientSessions(profile.patientDbId || profile.id);
       setSessions(data);
     } catch {
       setOffline(true);
@@ -125,7 +125,7 @@ export default function PatientHistoryScreen({ navigation }) {
                     <TouchableOpacity
                       key={String(item.id)}
                       style={[styles.row, !isLast && styles.rowBorder]}
-                      onPress={() => navigation.navigate('SessionDetail', { session: item, accent })}
+                      onPress={() => navigation.navigate('SessionDetail', { session: item, accent, isPatient: true })}
                       activeOpacity={0.7}
                     >
                       <View style={[styles.rowAccent, { backgroundColor: accent }]} />

@@ -4,7 +4,31 @@ import {
   ActivityIndicator, Alert, Animated, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAudioRecorder, RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
+import { useAudioRecorder, requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
+
+// Low-bitrate preset: 32kbps mono 16kHz → ~14MB/hour, well under Groq's 25MB limit
+// Supports 1.5+ hour consultations vs HIGH_QUALITY (~26 min limit)
+const LONG_SESSION_PRESET = {
+  android: {
+    extension: '.m4a',
+    outputFormat: 2,   // MPEG_4
+    audioEncoder: 3,   // AAC
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 32000,
+  },
+  ios: {
+    extension: '.m4a',
+    audioQuality: 0,   // LOW
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 32000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  web: { mimeType: 'audio/webm', bitsPerSecond: 32000 },
+};
 import { Ionicons } from '@expo/vector-icons';
 import {
   useFonts,
@@ -13,7 +37,7 @@ import {
   SpaceGrotesk_600SemiBold,
   SpaceGrotesk_700Bold,
 } from '@expo-google-fonts/space-grotesk';
-import { transcribeAudio, extractMedicalData, translateTranscript, diarizeTranscript, correctTranscript } from '../lib/groq';
+import { transcribeAudio, extractMedicalData, translateTranscript, diarizeTranscript, correctTranscript, buildLabeledTranscript } from '../lib/groq';
 import { api } from '../lib/api';
 import CaseSelectModal from '../components/CaseSelectModal';
 
@@ -155,7 +179,7 @@ export default function RecordScreen({ route }) {
   };
 
   const timerRef      = useRef(null);
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const audioRecorder = useAudioRecorder(LONG_SESSION_PRESET);
 
   const breatheAnim = useRef(new Animated.Value(1)).current;
   const ripple1     = useRef(new Animated.Value(0)).current;
@@ -257,15 +281,23 @@ export default function RecordScreen({ route }) {
       setTranscript(stt.text);
       setDetectedLang(stt.language);
       setDurationSecs(stt.duration || duration);
-      // Auto-diarize when both patient and doctor context are available
-      if (routePatient && routeDoctor && stt.text.trim()) {
+      // Correction pass — run on raw STT text (before diarization)
+      setStage(STAGE.CORRECTING);
+      let corrected = stt.text;
+      try {
+        corrected = await correctTranscript(stt.text, stt.language);
+        setCorrectedTranscript(corrected);
+      } catch (_) {
+        setCorrectedTranscript(stt.text);
+      }
+      // Auto-diarize on CORRECTED text for best speaker accuracy
+      if (routePatient && routeDoctor && corrected.trim()) {
         setStage(STAGE.DIARIZING);
         setIsDiarizing(true);
         try {
           const lines = await diarizeTranscript(
-            stt.text, routeDoctor.name, routePatient.name, stt.language
+            corrected, routeDoctor.name, routePatient.name, stt.language
           );
-          // Normalize speaker to lowercase so style conditions are reliable
           setDiarizedLines(
             lines
               .filter(l => l.speaker !== 'noise' && l.text?.trim())
@@ -276,14 +308,6 @@ export default function RecordScreen({ route }) {
         } finally {
           setIsDiarizing(false);
         }
-      }
-      // Correction pass — fix misheard drug names, dosages, medical terms
-      setStage(STAGE.CORRECTING);
-      try {
-        const corrected = await correctTranscript(stt.text, stt.language);
-        setCorrectedTranscript(corrected);
-      } catch (_) {
-        setCorrectedTranscript(stt.text); // fallback to raw
       }
       setStage(STAGE.IDLE);
     } catch {
@@ -296,8 +320,14 @@ export default function RecordScreen({ route }) {
     if (!transcript.trim()) { Alert.alert('Empty', 'No transcript to process.'); return; }
     setStage(STAGE.EXTRACTING); setErrMsg('');
     try {
-      // Pass corrected transcript to AI — falls back to raw if correction wasn't run
-      const textForAI = correctedTranscript || transcript;
+      // Build the best possible input for extraction:
+      // 1. If diarized → speaker-labeled text ("Dr. Arjun: ...\nPriya: ...")
+      //    The LLM can then attribute symptoms to patient, prescriptions to doctor
+      // 2. Else fallback to corrected transcript → raw transcript
+      const labeledText = diarizedLines.length > 0
+        ? buildLabeledTranscript(diarizedLines)
+        : null;
+      const textForAI = labeledText || correctedTranscript || transcript;
       const extracted = await extractMedicalData(textForAI, language, isFollowUp ? caseHistory : []);
       const saved     = await api.saveSession({
         rawTranscript: transcript,

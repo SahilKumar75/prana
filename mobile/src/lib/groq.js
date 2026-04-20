@@ -14,14 +14,21 @@ const LANG_PROMPT = {
   default: 'Medical consultation between doctor and patient. May include Hindi, Marathi, or English terms.',
 };
 
-const MEDICAL_PROMPT = `You are a clinical AI assistant for Indian hospitals. A doctor-patient consultation transcript is given (may be Hindi, Marathi, English, or code-switched mid-sentence). Extract ALL clinical information and return ONLY a valid JSON object — no markdown, no explanation.
+const MEDICAL_PROMPT = `You are a clinical AI assistant for Indian hospitals. A doctor-patient consultation transcript is given (may be Hindi, Marathi, English, or code-switched mid-sentence).
+
+IMPORTANT: If the transcript contains speaker labels like "Dr. [Name]:" or "[Patient Name]:", use them to correctly assign:
+- Symptoms, complaints, pain, duration → spoken by PATIENT
+- Diagnosis, prescriptions, instructions, dosage → spoken by DOCTOR
+Never attribute symptoms to the doctor or prescriptions to the patient.
+
+Extract ALL clinical information and return ONLY a valid JSON object — no markdown, no explanation.
 
 JSON structure (use null for missing fields, empty array [] for missing lists):
 {
   "patient_name": "string or null",
-  "symptoms": ["list of symptoms mentioned"],
+  "symptoms": ["list of symptoms — extract ONLY from patient utterances"],
   "symptom_duration": "how long symptoms have been present or null",
-  "diagnosis": "suspected or confirmed diagnosis or null",
+  "diagnosis": "suspected or confirmed diagnosis — extract ONLY from doctor utterances or null",
   "medications": [{"name": "generic drug name", "prescription_name": "brand/trade name if mentioned or null", "dose_mg": "numeric dose in mg or null", "dosage": "full dosage string e.g. 500mg", "frequency": "timing e.g. twice daily", "duration": "e.g. 5 days or null"}],
   "allergies": ["list or empty"],
   "vitals": {"bp": "string or null", "temp": "string or null", "pulse": "string or null", "spo2": "string or null"},
@@ -32,8 +39,27 @@ JSON structure (use null for missing fields, empty array [] for missing lists):
   "severity": "mild or moderate or severe"
 }
 
-For missing_info: flag anything clinically critical that was not mentioned — e.g. allergy history, vitals, diagnosis confirmation, medication dosage, duration of illness.
-For medications: capture ALL drugs, even if mentioned by Indian brand names or colloquially.`;
+Medication rules:
+- Extract ALL drugs mentioned by the doctor, even Indian brand names (Crocin=Paracetamol, Combiflam=Ibuprofen+Paracetamol, Pan=Pantoprazole)
+- dose_mg: numeric only (e.g. "500" not "500mg")
+- frequency must be specific: "twice daily", "three times a day", "at bedtime", "every 8 hours"
+- duration: always include if mentioned ("5 days", "1 week", "10 days")
+- If only brand name given, set prescription_name = brand, name = known generic
+
+For missing_info: flag anything clinically critical not mentioned — allergy history, vitals, diagnosis confirmation, medication dosage, duration of illness.`;
+
+// ─── Build speaker-labeled transcript from diarized lines ─────────────────────
+// Converts [{speaker, name, text}] → "Dr. Arjun: ...
+Priya: ..."
+// This is the KEY step: passing labeled text to extractMedicalData dramatically
+// improves symptom/prescription attribution accuracy.
+export function buildLabeledTranscript(lines) {
+  if (!lines || lines.length === 0) return '';
+  return lines
+    .filter(l => l.text?.trim())
+    .map(l => `${l.name}: ${l.text.trim()}`)
+    .join('\n');
+}
 
 // ─── Medical Transcript Correction ───────────────────────────────────────────
 // Post-processes raw Whisper output: fixes misheard drug names, dosages, medical
@@ -171,7 +197,19 @@ export async function processAudio(audioUri, languageCode = 'hi-IN') {
   };
 }
 
+// ─── Build speaker-labeled transcript ────────────────────────────────────────
+// "Dr. Arjun: ...\nPriya: ..." → extractMedicalData uses labels to correctly
+// attribute symptoms (patient utterances) vs prescriptions (doctor utterances).
+export function buildLabeledTranscript(lines) {
+  if (!lines || lines.length === 0) return '';
+  return lines
+    .filter(l => l.text?.trim())
+    .map(l => `${l.name}: ${l.text.trim()}`)
+    .join('\n');
+}
+
 // ─── Speaker Diarization ─────────────────────────────────────────────────────
+// Runs on the CORRECTED transcript for best accuracy.
 // Returns [{speaker: 'doctor'|'patient'|'noise', name: string, text: string}]
 export async function diarizeTranscript(rawText, doctorName, patientName, detectedLang) {
   if (!rawText?.trim()) return [];
@@ -185,20 +223,34 @@ export async function diarizeTranscript(rawText, doctorName, patientName, detect
       messages: [
         {
           role:    'system',
-          content: `You are a speaker diarization engine for medical consultations. Split the raw transcript into individual utterances and attribute each to the correct speaker.
+          content: `You are a speaker diarization engine specialized in Indian doctor-patient medical consultations. The conversation may be in Hindi, Marathi, English, or code-switched.
+
+Doctor speech patterns (assign to "doctor"):
+- Asks diagnostic questions: "kab se hai?", "koi allergy toh nahi?", "BP check karte hain"
+- Prescribes medications with dosage + frequency + duration: "Paracetamol 500mg twice daily for 5 days"
+- Gives clinical instructions: "rest karo", "pani zyada piyo", "kal wapas aao"
+- States diagnosis: "ye viral fever hai", "upper respiratory infection"
+- Uses clinical terms: "BP", "SPO2", "X-ray", "CBC", "prescription"
+
+Patient speech patterns (assign to "patient"):
+- Reports symptoms in first person: "mujhe dard hai", "bukhar aa raha hai", "weakness feel ho rahi hai"
+- Describes duration: "teen din se", "kal raat se", "subah se"
+- Gives answers: "haan", "nahi", pain scale numbers
+- Mentions history/allergies: "pehle bhi hua tha", "koi allergy nahi"
 
 Rules:
-- "doctor" speaks clinically: asks questions, gives diagnoses, prescribes, examines
-- "patient" describes symptoms, duration, pain, history, answers questions
-- "noise" is background sounds, coughs, or inaudible text — only include if significant
-- Preserve the original language of each utterance exactly — do NOT translate
+1. Split into individual speaker turns — each turn is one array entry
+2. A long monologue should be split at natural question-answer boundaries
+3. Preserve the EXACT original language of each utterance — do NOT translate
+4. Label "noise" only for truly inaudible content — omit coughs/silence
+5. If uncertain: default "doctor" for prescriptions, "patient" for symptom complaints
 
 Return ONLY valid JSON: {"lines": [{"speaker": "doctor"|"patient"|"noise", "name": "<actual name>", "text": "<utterance>"}]}
 No markdown, no explanation.`,
         },
         {
           role:    'user',
-          content: `Doctor: ${doctorName}. Patient: ${patientName}. Language: ${detectedLang || 'unknown'}.\n\nTranscript:\n${rawText}`,
+          content: `Doctor: ${doctorName}. Patient: ${patientName}. Language: ${detectedLang || 'mixed Hindi/English'}.\n\nTranscript:\n${rawText}`,
         },
       ],
     }),

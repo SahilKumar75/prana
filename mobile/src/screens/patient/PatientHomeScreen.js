@@ -170,7 +170,7 @@ export default function PatientHomeScreen({ navigation }) {
       console.warn('getPatientRequests error:', e.message);
     }
     try {
-      const sessions = await api.getPatientSessions(profile.id);
+      const sessions = await api.getPatientSessions(profile.patientDbId || profile.id);
       setPastSessions(sessions);
     } catch (e) {
       console.warn('getPatientSessions error:', e.message);
