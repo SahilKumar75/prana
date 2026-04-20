@@ -280,7 +280,9 @@ export default function RecordScreen({ route, navigation }) {
       await audioRecorder.stop();
       const uri = audioRecorder.uri;
       if (!uri) throw new Error('No audio file found.');
-      const stt = await transcribeAudio(uri, toWhisperLang(language));
+      // Pass full language code (e.g. 'hi-IN') so the STT router can pick the
+      // right provider. toWhisperLang() would strip it to 'hi' and break routing.
+      const stt = await transcribeAudio(uri, language === 'auto' ? 'auto' : language);
       setTranscript(stt.text);
       setDetectedLang(stt.language);
       setDurationSecs(stt.duration || duration);

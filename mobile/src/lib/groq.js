@@ -143,17 +143,22 @@ async function transcribeWithDeepgram(audioUri, languageCode) {
     model:        'nova-3-medical',
     punctuate:    'true',
     smart_format: 'true',
-    diarize:      'false',  // we run our own diarization with LLM
+    diarize:      'false',
   });
   if (lang) params.set('language', lang);
 
+  // React Native cannot fetch() a local file:// URI — must use FormData
+  const formData = new FormData();
+  formData.append('audio', {
+    uri:  audioUri,
+    type: 'audio/m4a',
+    name: 'recording.m4a',
+  });
+
   const res = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
     method:  'POST',
-    headers: {
-      Authorization:  `Token ${DEEPGRAM_KEY}`,
-      'Content-Type': 'audio/m4a',
-    },
-    body: await fetch(audioUri).then(r => r.blob()),
+    headers: { Authorization: `Token ${DEEPGRAM_KEY}` },
+    body:    formData,
   });
 
   if (!res.ok) throw new Error(`Deepgram STT failed: ${await res.text()}`);
@@ -196,7 +201,9 @@ async function transcribeWithSarvam(audioUri, languageCode) {
 }
 
 async function transcribeWithWhisper(audioUri, languageCode) {
-  const lang   = languageCode ? (LANG_MAP[languageCode] || languageCode) : undefined;
+  // Accept both full codes ('hi-IN') and short codes ('hi') — strip region suffix for Whisper
+  const shortCode = languageCode ? languageCode.split('-')[0] : undefined;
+  const lang   = shortCode ? (LANG_MAP[shortCode] || shortCode) : undefined;
   const prompt = lang ? LANG_PROMPT[lang] : undefined;
   const formData = new FormData();
   formData.append('file', { uri: audioUri, type: 'audio/m4a', name: 'recording.m4a' });
