@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Alert, Animated, TextInput,
+  ActivityIndicator, Alert, Animated, TextInput, Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAudioRecorder, requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
@@ -40,6 +40,7 @@ import {
 import { transcribeAudio, extractMedicalData, translateTranscript, diarizeTranscript, correctTranscript, buildLabeledTranscript } from '../lib/groq';
 import { api } from '../lib/api';
 import CaseSelectModal from '../components/CaseSelectModal';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const C = {
   bg:    '#f2f3f5',
@@ -190,6 +191,24 @@ export default function RecordScreen({ route, navigation }) {
   const ripple3     = useRef(new Animated.Value(0)).current;
   const barAnims    = useRef([0,1,2,3,4].map(() => new Animated.Value(4))).current;
 
+  // AI orb rotation values
+  const orbRotate1 = useRef(new Animated.Value(0)).current;
+  const orbRotate2 = useRef(new Animated.Value(0)).current;
+  const orbRotate3 = useRef(new Animated.Value(0)).current;
+  const glowPulse  = useRef(new Animated.Value(0.2)).current;
+  const rot1 = orbRotate1.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const rot2 = orbRotate2.interpolate({ inputRange: [0, 1], outputRange: ['360deg', '0deg'] });
+  const rot3 = orbRotate3.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const glowOpacityA = glowPulse.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.32] });
+  const glowOpacityB = glowPulse.interpolate({ inputRange: [0, 1], outputRange: [0.03, 0.12] });
+
+  // Hover float + inner core glow + persistent halo rings
+  const floatAnim  = useRef(new Animated.Value(0)).current;
+  const innerGlow  = useRef(new Animated.Value(0.2)).current;
+  const haloRing1  = useRef(new Animated.Value(0)).current;
+  const haloRing2  = useRef(new Animated.Value(0)).current;
+  const floatY = floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -9] });
+
   const isRecording    = stage === STAGE.RECORDING;
   const isTranscribing  = stage === STAGE.TRANSCRIBING;
   const isDiarizingStage = stage === STAGE.DIARIZING;
@@ -200,18 +219,11 @@ export default function RecordScreen({ route, navigation }) {
 
   useEffect(() => {
     if (isRecording) {
-      // 1. Breathe — slow timing scale
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(breatheAnim, { toValue: 1.07, duration: 1500, useNativeDriver: true }),
-          Animated.timing(breatheAnim, { toValue: 1,    duration: 1500, useNativeDriver: true }),
-        ])
-      ).start();
-      // 2. Ripple rings
+      // Ripple rings
       makeRipple(ripple1, 0).start();
-      makeRipple(ripple2, 600).start();
-      makeRipple(ripple3, 1200).start();
-      // 3. Equalizer bars
+      makeRipple(ripple2, 650).start();
+      makeRipple(ripple3, 1300).start();
+      // Equalizer bars
       const BARS = [
         { peak: 22, dur: 320, delay: 0   },
         { peak: 32, dur: 240, delay: 120 },
@@ -230,7 +242,6 @@ export default function RecordScreen({ route, navigation }) {
       );
       timerRef.current = setInterval(() => setTimer((t) => t + 1), 1000);
     } else {
-      breatheAnim.stopAnimation(); breatheAnim.setValue(1);
       [ripple1, ripple2, ripple3].forEach((r) => { r.stopAnimation(); r.setValue(0); });
       barAnims.forEach((b) => { b.stopAnimation(); b.setValue(4); });
       if (timerRef.current) clearInterval(timerRef.current);
@@ -247,16 +258,87 @@ export default function RecordScreen({ route, navigation }) {
       ])
     );
 
-  // Ring style: border-only circles that expand outward and fade
-  const ringStyle = (anim) => ({
+  // Recording ripple rings — aggressive expansion, lime
+  const rippleStyle = (anim) => ({
     position: 'absolute',
-    top: 50, left: 50,
-    width: 120, height: 120, borderRadius: 60,
-    borderWidth: 2,
-    borderColor: C.lime,
-    opacity: anim.interpolate({ inputRange: [0, 0.35, 1], outputRange: [0.9, 0.5, 0] }),
-    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.7] }) }],
+    top: 45, left: 45,
+    width: 210, height: 210, borderRadius: 105,
+    borderWidth: 1.5,
+    borderColor: 'rgba(241,245,249,0.80)',
+    opacity: anim.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0.90, 0.40, 0] }),
+    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.55] }) }],
   });
+
+  // Always-on halo rings — slow/soft idle, faster/brighter when active
+  const haloStyle = (anim, color) => ({
+    position: 'absolute',
+    top: 45, left: 45,
+    width: 210, height: 210, borderRadius: 105,
+    borderWidth: 1,
+    borderColor: color,
+    opacity: anim.interpolate({ inputRange: [0, 0.45, 1], outputRange: [0.55, 0.22, 0] }),
+    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.72] }) }],
+  });
+
+  // All orb animations — all driven by stage so they react to every state change
+  useEffect(() => {
+    const allAnims = [orbRotate1, orbRotate2, orbRotate3, glowPulse, breatheAnim, floatAnim, innerGlow, haloRing1, haloRing2];
+    allAnims.forEach(a => a.stopAnimation());
+
+    // ── Blob rotation speeds ─────────────────────────────────────────────────
+    const sp1 = isRecording ? 3200  : isBusy ? 6500  : 20000;
+    const sp2 = isRecording ? 5200  : isBusy ? 10500 : 31000;
+    const sp3 = isRecording ? 8000  : isBusy ? 15500 : 44000;
+    Animated.loop(Animated.timing(orbRotate1, { toValue: 1, duration: sp1, useNativeDriver: true, easing: Easing.linear })).start();
+    Animated.loop(Animated.timing(orbRotate2, { toValue: 1, duration: sp2, useNativeDriver: true, easing: Easing.linear })).start();
+    Animated.loop(Animated.timing(orbRotate3, { toValue: 1, duration: sp3, useNativeDriver: true, easing: Easing.linear })).start();
+
+    // ── Outer glow halo pulse ────────────────────────────────────────────────
+    const gMin = isRecording ? 0.50  : isBusy ? 0.24  : 0.08;
+    const gMax = isRecording ? 1.0   : isBusy ? 0.55  : 0.28;
+    const gDur = isRecording ? 650   : isBusy ? 1300  : 2800;
+    Animated.loop(Animated.sequence([
+      Animated.timing(glowPulse, { toValue: gMax, duration: gDur, useNativeDriver: true }),
+      Animated.timing(glowPulse, { toValue: gMin, duration: gDur, useNativeDriver: true }),
+    ])).start();
+
+    // ── Breathe (scale) ──────────────────────────────────────────────────────
+    const bTarget = isRecording ? 1.10 : isBusy ? 1.045 : 1.024;
+    const bDur    = isRecording ? 850  : isBusy ? 1500  : 3200;
+    Animated.loop(Animated.sequence([
+      Animated.timing(breatheAnim, { toValue: bTarget, duration: bDur, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+      Animated.timing(breatheAnim, { toValue: 1,       duration: bDur, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+    ])).start();
+
+    // ── Hover / float (translateY) ───────────────────────────────────────────
+    const fDur = isRecording ? 1100 : isBusy ? 1900 : 3800;
+    Animated.loop(Animated.sequence([
+      Animated.timing(floatAnim, { toValue: 1, duration: fDur, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+      Animated.timing(floatAnim, { toValue: 0, duration: fDur, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+    ])).start();
+
+    // ── Inner core glow (opacity) ────────────────────────────────────────────
+    const igMin = isRecording ? 0.50 : isBusy ? 0.28 : 0.10;
+    const igMax = isRecording ? 1.0  : isBusy ? 0.62 : 0.32;
+    const igDur = isRecording ? 580  : isBusy ? 1100 : 2600;
+    Animated.loop(Animated.sequence([
+      Animated.timing(innerGlow, { toValue: igMax, duration: igDur, useNativeDriver: true }),
+      Animated.timing(innerGlow, { toValue: igMin, duration: igDur, useNativeDriver: true }),
+    ])).start();
+
+    // ── Persistent halo rings (always visible, pace varies) ──────────────────
+    const haloDur = isRecording ? 1700 : isBusy ? 2800 : 5500;
+    const makeHalo = (anim, delay) =>
+      Animated.loop(Animated.sequence([
+        Animated.delay(delay),
+        Animated.timing(anim, { toValue: 1, duration: haloDur, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ]));
+    makeHalo(haloRing1, 0).start();
+    makeHalo(haloRing2, haloDur / 2).start();
+
+    return () => allAnims.forEach(a => a.stopAnimation());
+  }, [stage]);
 
   const startRecording = async () => {
     setErrMsg(''); setResult(null); setTranscript('');
@@ -445,40 +527,91 @@ export default function RecordScreen({ route, navigation }) {
           ))}
         </View>
 
-        {/* VOICE ORB */}
+        {/* VOICE ORB — AI voice assistant orb */}
         <View style={s.orbZone}>
-          {/* Breathing glow rings — blue, expand + fade when recording */}
-          {isRecording && (
-            <>
-              <Animated.View style={[s.orbBreathRing, {
-                transform: [{ scale: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [1.22, 1.65] }) }],
-                opacity: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [0.28, 0.08] }),
-              }]} />
-              <Animated.View style={[s.orbBreathRing, {
-                transform: [{ scale: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [1.52, 1.95] }) }],
-                opacity: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [0.13, 0.03] }),
-              }]} />
-            </>
-          )}
+          {/* Fixed-size container keeps all glow/touch layers centred */}
+          <View style={s.orbContainer}>
 
-          {/* Orb — blue watercolor layers, scale breathes when recording */}
-          <Animated.View style={[s.voiceOrb, { transform: [{ scale: breatheAnim }] }]}>
-            <View style={s.orbLayer1} />
-            <View style={s.orbLayer2} />
-            <View style={s.orbHighlight} />
-            <View style={s.orbAccent} />
-            {isBusy && (
-              <ActivityIndicator style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} color="rgba(255,255,255,0.85)" size="large" />
+            {/* ── Layer 0: Deep ambient glow blobs behind the orb ─────────────── */}
+            <Animated.View style={[s.orbGlowA, { opacity: glowOpacityA }]} />
+            <Animated.View style={[s.orbGlowB, { opacity: glowOpacityB }]} />
+
+            {/* ── Layer 1: Always-on halo rings (slow idle → fast recording) ─── */}
+            <Animated.View style={haloStyle(haloRing1, '#f472b6')} />
+            <Animated.View style={haloStyle(haloRing2, '#a855f7')} />
+
+            {/* ── Layer 2: Aggressive ripple rings — recording only ───────────── */}
+            {isRecording && (
+              <>
+                <Animated.View style={rippleStyle(ripple1)} />
+                <Animated.View style={rippleStyle(ripple2)} />
+                <Animated.View style={rippleStyle(ripple3)} />
+              </>
             )}
-          </Animated.View>
 
-          {/* Touch target laid over orb */}
-          <TouchableOpacity
-            style={s.orbTouchTarget}
-            onPress={isRecording ? stopAndTranscribe : (isBusy ? null : startRecording)}
-            activeOpacity={0.9}
-            disabled={isBusy}
-          />
+            {/* ── Layer 3: The orb itself — breathes + hovers ─────────────────── */}
+            <Animated.View style={[
+              s.voiceOrb,
+              { transform: [{ scale: breatheAnim }, { translateY: floatY }] },
+            ]}>
+              {/* Base: white → pale pink — light glass-marble foundation */}
+              <LinearGradient
+                colors={['#ffffff', '#fdf2f8', '#fce7f3']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFillObject}
+              />
+              {/* Rotating sweep 1 — hot pink / magenta arc (clockwise) */}
+              <Animated.View style={[s.orbBlobWrap, { transform: [{ rotate: rot1 }] }]}>
+                <LinearGradient
+                  colors={['transparent', 'rgba(236,72,153,0.88)', 'rgba(255,80,200,0.72)', 'transparent']}
+                  start={{ x: 0.0, y: 0.1 }}
+                  end={{ x: 1.0, y: 0.9 }}
+                  style={[StyleSheet.absoluteFillObject, { borderRadius: 105 }]}
+                />
+              </Animated.View>
+              {/* Rotating blob 2 — blue (counter-clockwise, lower-left sweep) */}
+              <Animated.View style={[s.orbBlobWrap, { transform: [{ rotate: rot2 }] }]}>
+                <View style={s.orbBlob2} />
+              </Animated.View>
+              {/* Rotating sweep 3 — purple / violet arc (clockwise, offset) */}
+              <Animated.View style={[s.orbBlobWrap, { transform: [{ rotate: rot3 }] }]}>
+                <LinearGradient
+                  colors={['transparent', 'rgba(147,51,234,0.72)', 'rgba(168,85,247,0.55)', 'transparent']}
+                  start={{ x: 1.0, y: 0.0 }}
+                  end={{ x: 0.0, y: 1.0 }}
+                  style={[StyleSheet.absoluteFillObject, { borderRadius: 105 }]}
+                />
+              </Animated.View>
+              {/* Fixed white gloss streak — diagonal, creates glass-marble sheen */}
+              <LinearGradient
+                colors={['transparent', 'rgba(255,255,255,0.82)', 'rgba(255,255,255,0.55)', 'transparent']}
+                start={{ x: 0.15, y: 0.0 }}
+                end={{ x: 0.55, y: 1.0 }}
+                style={StyleSheet.absoluteFillObject}
+              />
+              {/* Very light vignette at edges — adds spherical depth */}
+              <View style={s.orbFrost} />
+              {/* Pulsing inner core — bright white radial burst */}
+              <Animated.View style={[s.orbCore, { opacity: innerGlow }]} />
+              {/* Rim light — soft pink-white border */}
+              <Animated.View style={[s.orbRim, { opacity: innerGlow }]} />
+              {/* Specular highlight — large top-left gloss reflection */}
+              <View style={s.orbHighlight} />
+              {/* Processing spinner */}
+              {isBusy && (
+                <ActivityIndicator style={s.orbSpinner} color="rgba(60,10,80,0.70)" size="large" />
+              )}
+            </Animated.View>
+
+            {/* ── Layer 4: Touch target centred over the orb ──────────────────── */}
+            <TouchableOpacity
+              style={s.orbTouchTarget}
+              onPress={isRecording ? stopAndTranscribe : (isBusy ? null : startRecording)}
+              activeOpacity={0.9}
+              disabled={isBusy}
+            />
+          </View>
 
           {/* Status / timer below orb */}
           <View style={s.orbStatus}>
@@ -494,12 +627,12 @@ export default function RecordScreen({ route, navigation }) {
               </View>
             ) : isBusy ? (
               <Text style={s.statusHintNew}>
-                {isTranscribing ? 'Transcribing…' : isDiarizingStage ? 'Identifying speakers…' : isCorrectingStage ? 'Correcting…' : 'Processing…'}
+                {isTranscribing ? 'Listening to audio…' : isDiarizingStage ? 'Identifying speakers…' : isCorrectingStage ? 'Refining transcript…' : 'Processing…'}
               </Text>
             ) : isDone ? (
-              <Text style={s.doneHintNew}>Saved ✓</Text>
+              <Text style={s.doneHintNew}>Session saved ✓</Text>
             ) : (
-              <Text style={s.tapHintNew}>Tap orb to record</Text>
+              <Text style={s.tapHintNew}>Tap to begin session</Text>
             )}
           </View>
         </View>
@@ -891,30 +1024,98 @@ const s = StyleSheet.create({
   statusHint:   { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray, marginTop: 6 },
   doneHint:     { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#3a6e00', marginTop: 6 },
 
-  // ── Voice Orb (ChatGPT Voice style) ──────────────────────────────────────────
-  orbZone: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8, marginBottom: 12 },
-  voiceOrb: {
-    width: 200, height: 200, borderRadius: 100,
-    backgroundColor: '#b8dff5',
-    overflow: 'hidden',
-    shadowColor: '#4a9fd4', shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.28, shadowRadius: 28, elevation: 10,
+  // ── Voice Orb — ChatGPT-style AI voice assistant ─────────────────────────────
+  orbZone:      { alignItems: 'center', justifyContent: 'center', paddingVertical: 12, marginBottom: 8 },
+  // Container: 300×300 gives room for halo rings to expand without clipping
+  orbContainer: { width: 300, height: 300, alignItems: 'center', justifyContent: 'center' },
+
+  // Ambient glow blobs: large blurred soft circles behind the orb
+  // opacity driven by glowPulse — hot pink + purple
+  orbGlowA: {
+    position: 'absolute', top: 20, left: 20,
+    width: 260, height: 260, borderRadius: 130,
+    backgroundColor: '#ec4899',
+    shadowColor: '#ec4899', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1, shadowRadius: 65, elevation: 0,
   },
-  orbLayer1:   { position: 'absolute', top: 14, right: 12, width: 158, height: 148, borderRadius: 80, backgroundColor: '#8ec8ef', opacity: 0.72 },
-  orbLayer2:   { position: 'absolute', bottom: 18, left: 12, width: 125, height: 108, borderRadius: 62, backgroundColor: '#5aaee0', opacity: 0.38 },
-  orbHighlight:{ position: 'absolute', top: 26, left: 40, width: 90, height: 72, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.62)' },
-  orbAccent:   { position: 'absolute', bottom: 22, right: 20, width: 68, height: 58, borderRadius: 34, backgroundColor: 'rgba(28,96,188,0.26)' },
-  orbBreathRing:{ position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: '#b8dff5' },
-  orbTouchTarget:{ position: 'absolute', width: 200, height: 200, borderRadius: 100 },
-  orbStatus:   { marginTop: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
+  orbGlowB: {
+    position: 'absolute', top: 5, left: 5,
+    width: 290, height: 290, borderRadius: 145,
+    backgroundColor: '#9333ea',
+    shadowColor: '#c084fc', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1, shadowRadius: 80, elevation: 0,
+  },
+
+  // Main orb: white fallback, gradient applied via LinearGradient child
+  voiceOrb: {
+    width: 210, height: 210, borderRadius: 105,
+    backgroundColor: '#ffffff',
+    overflow: 'hidden',
+    shadowColor: '#c026d3',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.55, shadowRadius: 42, elevation: 24,
+  },
+
+  // Wrapper: fills the orb so rotating it orbits blobs around the centre
+  orbBlobWrap: { position: 'absolute', width: 210, height: 210, borderRadius: 105 },
+
+  // Blob 1 — (unused, replaced by LinearGradient sweeps)
+  orbBlob1: { position: 'absolute', top: -65, left: -50, width: 240, height: 220, borderRadius: 120, backgroundColor: '#ec4899', opacity: 0 },
+  // Blob 2 — vivid blue (lower-left, counter-clockwise)
+  orbBlob2: {
+    position: 'absolute', bottom: -70, left: -60,
+    width: 250, height: 230, borderRadius: 125,
+    backgroundColor: '#3b82f6', opacity: 0.60,
+  },
+  // Blob 3 — (unused, replaced by LinearGradient sweeps)
+  orbBlob3: { position: 'absolute', top: 15, right: -75, width: 210, height: 185, borderRadius: 100, backgroundColor: '#9333ea', opacity: 0 },
+
+  // Edge vignette — very faint, adds spherical depth without darkening
+  orbFrost: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 105, backgroundColor: 'rgba(120,20,140,0.06)',
+  },
+
+  // Inner core glow — pulsing bright white burst at centre
+  orbCore: {
+    position: 'absolute', top: 55, left: 55,
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    shadowColor: '#ffffff',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1, shadowRadius: 48, elevation: 0,
+  },
+
+  // Rim light — thin pink-white border
+  orbRim: {
+    position: 'absolute', top: 1, left: 1,
+    width: 208, height: 208, borderRadius: 104,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,200,240,0.80)',
+  },
+
+  // Specular highlight — large top-left gloss blob (glass-marble reflection)
+  orbHighlight: {
+    position: 'absolute', top: 16, left: 22,
+    width: 100, height: 72, borderRadius: 50,
+    backgroundColor: 'rgba(255,255,255,0.48)',
+  },
+
+  // Spinner overlay
+  orbSpinner: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+
+  // Touch target: centred in the 300×300 container over the 210×210 orb
+  // (300-210)/2 = 45
+  orbTouchTarget: { position: 'absolute', top: 45, left: 45, width: 210, height: 210, borderRadius: 105 },
+  orbStatus:      { marginTop: 6, height: 42, alignItems: 'center', justifyContent: 'center' },
   timerRowNew: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  recDotNew:   { width: 7, height: 7, borderRadius: 4, backgroundColor: '#e74c3c' },
+  recDotNew:   { width: 7, height: 7, borderRadius: 4, backgroundColor: '#ec4899' },
   timerTextNew:{ fontSize: 22, fontFamily: 'SpaceGrotesk_700Bold', color: '#202020', letterSpacing: 2 },
   eqRowNew:    { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 30, marginLeft: 4 },
-  eqBarNew:    { width: 4, borderRadius: 2, backgroundColor: '#5aaee0' },
-  tapHintNew:  { fontSize: 14, fontFamily: 'SpaceGrotesk_500Medium', color: '#bbbbbe' },
-  statusHintNew:{ fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#888888' },
-  doneHintNew: { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#3a6e00' },
+  eqBarNew:    { width: 4, borderRadius: 2, backgroundColor: '#a855f7' },
+  tapHintNew:  { fontSize: 14, fontFamily: 'SpaceGrotesk_500Medium', color: '#c084fc' },
+  statusHintNew:{ fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#9333ea' },
+  doneHintNew: { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#9333ea' },
 
   fieldLabel:      { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
   transcriptCard:   { backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12 },
