@@ -205,7 +205,6 @@ export async function transcribeAudio(audioUri, languageCode) {
   // All others → Groq Whisper (FormData, works reliably with local file:// URIs)
   return transcribeWithWhisper(audioUri, languageCode);
 }
-}
 
 
 // ─── LLaMA 3 Medical Data Extraction ─────────────────────────────────────────
