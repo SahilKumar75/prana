@@ -26,9 +26,9 @@ const C = {
   warnB: '#f59e0b',
 };
 
-const statusColor = (s) => ({ processed: '#3a6e00', error: '#c0392b', pending: '#7a5c00' }[s] || C.gray);
-const statusBg    = (s) => ({ processed: C.lime,    error: '#fce8e6',  pending: '#fff8e1' }[s] || C.bg);
-const statusLabel = (s) => ({ processed: 'Processed', error: 'Error', pending: 'Pending' }[s] || s || 'Pending');
+const statusColor = (s) => ({ processed: '#166534', error: '#c0392b', pending: '#7a5c00' }[s] || C.gray);
+const statusBg    = (s) => ({ processed: '#dcfce7',  error: '#fee2e2',  pending: '#fef9c3' }[s] || C.bg);
+const statusLabel = (s) => ({ processed: 'Done',      error: 'Error',    pending: 'Pending' }[s] || s || 'Pending');
 
 const fmt = (iso) => {
   if (!iso) return '';
@@ -153,8 +153,17 @@ export default function SessionDetailScreen({ route, navigation }) {
         {/* TITLE ROW */}
         <View style={s.titleRow}>
           <Text style={s.pageTitle}>Session Detail</Text>
-          <View style={[s.statusBadge, { backgroundColor: statusBg(session.status) }]}>
-            <Text style={[s.statusText, { color: statusColor(session.status) }]}>{statusLabel(session.status)}</Text>
+          <View style={s.titleBadges}>
+            {d.follow_up_required ? (
+              <View style={[s.statusBadge, { backgroundColor: '#fee2e2' }]}>
+                <Ionicons name="calendar-outline" size={12} color="#b91c1c" />
+                <Text style={[s.statusText, { color: '#b91c1c' }]}>Follow-up</Text>
+              </View>
+            ) : (
+              <View style={[s.statusBadge, { backgroundColor: statusBg(session.status) }]}>
+                <Text style={[s.statusText, { color: statusColor(session.status) }]}>{statusLabel(session.status)}</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -292,22 +301,6 @@ export default function SessionDetailScreen({ route, navigation }) {
           <InfoRow icon="calendar-outline" label="Follow-up" value={d.follow_up} />
         )}
 
-        {/* DOCTOR ASSIST — MISSING INFO */}
-        {missing.length > 0 && (
-          <View style={s.missingCard}>
-            <View style={s.missingHeader}>
-              <Ionicons name="warning-outline" size={16} color={C.warnB} />
-              <Text style={s.missingTitle}>Doctor Assist — Missing Information</Text>
-            </View>
-            {missing.map((item, i) => (
-              <View key={i} style={s.missingRow}>
-                <Ionicons name="alert-circle-outline" size={14} color={C.warnB} />
-                <Text style={s.missingText}>{item}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
         {/* PRESCRIPTION DOWNLOAD — patient only */}
         {medications.length > 0 && isPatient && (
           <TouchableOpacity
@@ -388,8 +381,9 @@ const s = StyleSheet.create({
   backText:  { fontSize: 15, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
 
   titleRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  titleBadges: { flexDirection: 'row', gap: 6 },
   pageTitle:   { fontSize: 26, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: -0.5 },
-  statusBadge: { borderRadius: 50, paddingHorizontal: 12, paddingVertical: 5 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 50, paddingHorizontal: 12, paddingVertical: 5 },
   statusText:  { fontSize: 12, fontFamily: 'SpaceGrotesk_700Bold' },
 
   metaRow:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20 },

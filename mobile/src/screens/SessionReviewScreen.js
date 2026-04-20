@@ -218,32 +218,45 @@ export default function SessionReviewScreen({ route, navigation }) {
     setMedications(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const handleSave = async () => {
+  const doSave = async () => {
     setSaving(true);
     try {
       const updatedData = {
         ...initialExtracted,
-        patient_name:      patientName  || null,
-        diagnosis:         diagnosis    || null,
-        severity:          severity     || null,
-        symptom_duration:  symptomDuration || null,
+        patient_name:       patientName     || null,
+        diagnosis:          diagnosis       || null,
+        severity:           severity        || null,
+        symptom_duration:   symptomDuration || null,
         symptoms,
-        medications:       medications.filter(m => m.name?.trim()),
-        follow_up:         followUp  || null,
-        summary:           summary   || null,
-        doctor_notes:      notes     || null,
+        medications:        medications.filter(m => m.name?.trim()),
+        follow_up:          followUp  || null,
+        summary:            summary   || null,
+        doctor_notes:       notes     || null,
         follow_up_required: followUpRequired,
       };
       await api.updateSession(session.id, { extracted_data: updatedData });
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'MainTabs' }],
-      });
+      navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] });
     } catch (e) {
       Alert.alert('Save failed', e.message || 'Could not update session.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = () => {
+    if (criticalMissing.length > 0) {
+      const fieldList = criticalMissing.map(f => `\u2022 ${f}`).join('\n');
+      Alert.alert(
+        'Missing Critical Information',
+        `Please fill in the following before confirming:\n\n${fieldList}\n\nThe patient needs these details before leaving.`,
+        [
+          { text: 'Go Back & Fill', style: 'cancel' },
+          { text: 'Save Anyway', style: 'destructive', onPress: doSave },
+        ]
+      );
+      return;
+    }
+    doSave();
   };
 
   if (!fontsLoaded) return null;

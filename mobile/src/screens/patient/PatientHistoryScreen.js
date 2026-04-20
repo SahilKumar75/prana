@@ -62,8 +62,8 @@ export default function PatientHistoryScreen({ navigation }) {
     });
   };
 
-  const statusColor = (s) => ({ processed: '#9AAB63', error: '#e57373', pending: '#c09a1a' }[s] || '#bbb');
-  const statusLabel = (s) => ({ processed: 'Done', error: 'Error', pending: 'Pending' }[s] || s || 'Pending');
+  const isFollowUp = (item) => item.extracted_data?.follow_up_required === true;
+  const isDone     = (item) => item.status === 'processed';
 
   if (!fontsLoaded) return null;
 
@@ -112,7 +112,9 @@ export default function PatientHistoryScreen({ navigation }) {
               </View>
               <View style={styles.card}>
                 {sessions.map((item, index) => {
-                  const accent   = ACCENT[index % ACCENT.length];
+                  const isFollowUpItem = isFollowUp(item);
+                  const isDoneItem     = isDone(item);
+                  const accent   = isFollowUpItem ? '#ef4444' : isDoneItem ? '#22c55e' : '#d1d5db';
                   const lang     = (item.language || 'hi-IN').split('-')[0].toUpperCase();
                   const isLast   = index === sessions.length - 1;
                   const d        = item.extracted_data || {};
@@ -141,10 +143,21 @@ export default function PatientHistoryScreen({ navigation }) {
                         </View>
                       </View>
                       <View style={styles.rowRight}>
-                        <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
-                        <Text style={[styles.statusTxt, { color: statusColor(item.status) }]}>
-                          {statusLabel(item.status)}
-                        </Text>
+                        {isFollowUp(item) ? (
+                          <View style={styles.tagFollowUp}>
+                            <Ionicons name="calendar-outline" size={11} color="#b91c1c" />
+                            <Text style={styles.tagFollowUpTxt}>Follow-up</Text>
+                          </View>
+                        ) : isDone(item) ? (
+                          <View style={styles.tagDone}>
+                            <Ionicons name="checkmark-circle-outline" size={11} color="#166534" />
+                            <Text style={styles.tagDoneTxt}>Done</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.tagPending}>
+                            <Text style={styles.tagPendingTxt}>Pending</Text>
+                          </View>
+                        )}
                         <Ionicons name="chevron-forward" size={16} color={C.muted} />
                       </View>
                     </TouchableOpacity>
@@ -191,9 +204,13 @@ const styles = StyleSheet.create({
   rowBody:   { flex: 1 },
   rowTitle:  { fontSize: 15, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
   rowDate:   { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.muted, marginTop: 3 },
-  rowRight:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
-  statusTxt: { fontSize: 12, fontFamily: 'SpaceGrotesk_500Medium' },
+  rowRight:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tagDone:        { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#dcfce7', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
+  tagDoneTxt:     { fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#166534' },
+  tagFollowUp:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fee2e2', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
+  tagFollowUpTxt: { fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#b91c1c' },
+  tagPending:     { backgroundColor: '#fef9c3', borderRadius: 50, paddingHorizontal: 10, paddingVertical: 4 },
+  tagPendingTxt:  { fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#854d0e' },
 
   medChip:    { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
   medChipTxt: { fontSize: 10, fontFamily: 'SpaceGrotesk_600SemiBold' },
