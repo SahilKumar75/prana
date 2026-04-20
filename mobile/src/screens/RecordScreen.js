@@ -67,10 +67,11 @@ export default function RecordScreen() {
   const timerRef      = useRef(null);
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
-  const ripple1  = useRef(new Animated.Value(0)).current;
-  const ripple2  = useRef(new Animated.Value(0)).current;
-  const ripple3  = useRef(new Animated.Value(0)).current;
-  const micPulse = useRef(new Animated.Value(1)).current;
+  const breatheAnim = useRef(new Animated.Value(1)).current;
+  const ripple1     = useRef(new Animated.Value(0)).current;
+  const ripple2     = useRef(new Animated.Value(0)).current;
+  const ripple3     = useRef(new Animated.Value(0)).current;
+  const barAnims    = useRef([0,1,2,3,4].map(() => new Animated.Value(4))).current;
 
   const isRecording    = stage === STAGE.RECORDING;
   const isTranscribing = stage === STAGE.TRANSCRIBING;
@@ -80,18 +81,39 @@ export default function RecordScreen() {
 
   useEffect(() => {
     if (isRecording) {
-      startRipples();
+      // 1. Breathe — slow timing scale
       Animated.loop(
         Animated.sequence([
-          Animated.spring(micPulse, { toValue: 1.07, useNativeDriver: true, tension: 120, friction: 5 }),
-          Animated.spring(micPulse, { toValue: 1,    useNativeDriver: true, tension: 120, friction: 5 }),
+          Animated.timing(breatheAnim, { toValue: 1.07, duration: 1500, useNativeDriver: true }),
+          Animated.timing(breatheAnim, { toValue: 1,    duration: 1500, useNativeDriver: true }),
         ])
       ).start();
+      // 2. Ripple rings
+      makeRipple(ripple1, 0).start();
+      makeRipple(ripple2, 600).start();
+      makeRipple(ripple3, 1200).start();
+      // 3. Equalizer bars
+      const BARS = [
+        { peak: 22, dur: 320, delay: 0   },
+        { peak: 32, dur: 240, delay: 120 },
+        { peak: 18, dur: 380, delay: 60  },
+        { peak: 28, dur: 290, delay: 180 },
+        { peak: 24, dur: 260, delay: 90  },
+      ];
+      BARS.forEach(({ peak, dur, delay }, i) =>
+        Animated.loop(
+          Animated.sequence([
+            Animated.delay(delay),
+            Animated.timing(barAnims[i], { toValue: peak, duration: dur, useNativeDriver: false }),
+            Animated.timing(barAnims[i], { toValue: 4,    duration: dur, useNativeDriver: false }),
+          ])
+        ).start()
+      );
       timerRef.current = setInterval(() => setTimer((t) => t + 1), 1000);
     } else {
-      micPulse.stopAnimation();
-      micPulse.setValue(1);
+      breatheAnim.stopAnimation(); breatheAnim.setValue(1);
       [ripple1, ripple2, ripple3].forEach((r) => { r.stopAnimation(); r.setValue(0); });
+      barAnims.forEach((b) => { b.stopAnimation(); b.setValue(4); });
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
@@ -101,23 +123,20 @@ export default function RecordScreen() {
     Animated.loop(
       Animated.sequence([
         Animated.delay(delay),
-        Animated.timing(anim, { toValue: 1, duration: 1400, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 1, duration: 1600, useNativeDriver: true }),
         Animated.timing(anim, { toValue: 0, duration: 0,    useNativeDriver: true }),
       ])
     );
 
-  const startRipples = () => {
-    makeRipple(ripple1, 0).start();
-    makeRipple(ripple2, 467).start();
-    makeRipple(ripple3, 934).start();
-  };
-
-  const rippleStyle = (anim) => ({
+  // Ring style: border-only circles that expand outward and fade
+  const ringStyle = (anim) => ({
     position: 'absolute',
-    width: 160, height: 160, borderRadius: 80,
-    backgroundColor: C.lime,
-    opacity: anim.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.30, 0] }),
-    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.5] }) }],
+    top: 50, left: 50,
+    width: 120, height: 120, borderRadius: 60,
+    borderWidth: 2,
+    borderColor: C.lime,
+    opacity: anim.interpolate({ inputRange: [0, 0.35, 1], outputRange: [0.9, 0.5, 0] }),
+    transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.7] }) }],
   });
 
   const startRecording = async () => {
@@ -223,30 +242,54 @@ export default function RecordScreen() {
 
         {/* MIC ZONE */}
         <View style={s.micZone}>
-          <Animated.View style={rippleStyle(ripple3)} />
-          <Animated.View style={rippleStyle(ripple2)} />
-          <Animated.View style={rippleStyle(ripple1)} />
-          <Animated.View style={{ transform: [{ scale: micPulse }] }}>
-            <TouchableOpacity
-              style={[s.micBtn, isRecording && s.micBtnActive]}
-              onPress={isRecording ? stopAndTranscribe : (isBusy ? null : startRecording)}
-              activeOpacity={0.88}
-              disabled={isBusy}
-            >
-              {isTranscribing
-                ? <ActivityIndicator color={C.dark} size="large" />
-                : <Ionicons
-                    name={isRecording ? 'stop' : 'mic'}
-                    size={42}
-                    color={isRecording ? C.white : C.dark}
-                  />
-              }
-            </TouchableOpacity>
-          </Animated.View>
+          <View style={s.orbArea}>
+            {/* Glow halo — breathes with the orb */}
+            {isRecording && (
+              <Animated.View style={[s.orbGlow, {
+                opacity:   breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [0.45, 0.9] }),
+                transform: [{ scale: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [1, 1.45] }) }],
+              }]} />
+            )}
+            {/* Ripple rings — border circles that expand outward */}
+            {isRecording && (
+              <>
+                <Animated.View style={ringStyle(ripple1)} />
+                <Animated.View style={ringStyle(ripple2)} />
+                <Animated.View style={ringStyle(ripple3)} />
+              </>
+            )}
+            {/* Orb with breathe scale */}
+            <Animated.View style={{ transform: [{ scale: breatheAnim }] }}>
+              <TouchableOpacity
+                style={[s.micBtn, isRecording && s.micBtnActive]}
+                onPress={isRecording ? stopAndTranscribe : (isBusy ? null : startRecording)}
+                activeOpacity={0.88}
+                disabled={isBusy}
+              >
+                {isTranscribing
+                  ? <ActivityIndicator color={C.dark} size="large" />
+                  : <Ionicons
+                      name={isRecording ? 'stop' : 'mic'}
+                      size={42}
+                      color={isRecording ? C.white : C.dark}
+                    />
+                }
+              </TouchableOpacity>
+            </Animated.View>
+          </View>
+
+          {/* Status row: timer + equalizer bars OR hint text */}
           {isRecording ? (
-            <View style={s.timerRow}>
-              <View style={s.recDot} />
-              <Text style={s.timerText}>{fmtTimer(timer)}</Text>
+            <View style={s.recStatus}>
+              <View style={s.timerRow}>
+                <View style={s.recDot} />
+                <Text style={s.timerText}>{fmtTimer(timer)}</Text>
+              </View>
+              <View style={s.eqRow}>
+                {barAnims.map((anim, i) => (
+                  <Animated.View key={i} style={[s.eqBar, { height: anim }]} />
+                ))}
+              </View>
             </View>
           ) : isTranscribing ? (
             <Text style={s.statusHint}>Transcribing audio…</Text>
@@ -481,15 +524,20 @@ const s = StyleSheet.create({
   langChipText:       { fontSize: 14, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.muted },
   langChipTextActive: { color: C.white },
 
-  micZone:      { alignItems: 'center', justifyContent: 'center', height: 210, marginBottom: 20 },
-  micBtn:       { width: 120, height: 120, borderRadius: 60, backgroundColor: C.lime, alignItems: 'center', justifyContent: 'center', shadowColor: C.lime, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 12 },
+  micZone:      { alignItems: 'center', marginBottom: 12 },
+  orbArea:      { width: 220, height: 220, alignItems: 'center', justifyContent: 'center' },
+  orbGlow:      { position: 'absolute', top: 40, left: 40, width: 140, height: 140, borderRadius: 70, backgroundColor: C.lime, shadowColor: C.lime, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 40 },
+  micBtn:       { width: 120, height: 120, borderRadius: 60, backgroundColor: C.lime, alignItems: 'center', justifyContent: 'center', shadowColor: C.lime, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.45, shadowRadius: 18, elevation: 12 },
   micBtnActive: { backgroundColor: C.dark },
-  timerRow:     { flexDirection: 'row', alignItems: 'center', marginTop: 18, gap: 8 },
+  recStatus:    { alignItems: 'center', marginTop: 2 },
+  timerRow:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
   recDot:       { width: 8, height: 8, borderRadius: 4, backgroundColor: C.red },
   timerText:    { fontSize: 22, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: 2 },
-  tapHint:      { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.muted, marginTop: 14 },
-  statusHint:   { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray, marginTop: 14 },
-  doneHint:     { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#3a6e00', marginTop: 14 },
+  eqRow:        { flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 36, marginTop: 8 },
+  eqBar:        { width: 5, borderRadius: 2.5, backgroundColor: C.dark },
+  tapHint:      { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.muted, marginTop: 6 },
+  statusHint:   { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray, marginTop: 6 },
+  doneHint:     { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#3a6e00', marginTop: 6 },
 
   fieldLabel:      { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
   transcriptCard:  { backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12 },
