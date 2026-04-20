@@ -13,8 +13,9 @@ import {
   SpaceGrotesk_600SemiBold,
   SpaceGrotesk_700Bold,
 } from '@expo-google-fonts/space-grotesk';
-import { transcribeAudio, extractMedicalData } from '../lib/groq';
+import { transcribeAudio, extractMedicalData, translateTranscript } from '../lib/groq';
 import { api } from '../lib/api';
+import CaseSelectModal from '../components/CaseSelectModal';
 
 const C = {
   bg:    '#f2f3f5',
@@ -54,7 +55,11 @@ const STAGE = { IDLE: 0, RECORDING: 1, TRANSCRIBING: 2, EXTRACTING: 3, DONE: 4, 
 const fmtTimer = (s) =>
   `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-export default function RecordScreen() {
+export default function RecordScreen({ route }) {
+  // Pre-filled context when coming from a patient card
+  const routePatient    = route?.params?.patientProfile   || null;
+  const routeDoctor     = route?.params?.doctorProfile    || null;
+  const routeRequestId  = route?.params?.sessionRequestId || null;
   const [fontsLoaded] = useFonts({
     SpaceGrotesk_400Regular,
     SpaceGrotesk_500Medium,
@@ -68,10 +73,59 @@ export default function RecordScreen() {
   const [transcript,   setTranscript]   = useState('');
   const [detectedLang, setDetectedLang] = useState(null);
   const [durationSecs, setDurationSecs] = useState(0);
-  const [patientName,  setPatientName]  = useState('');
-  const [patientId,    setPatientId]    = useState('');
+  const [patientName,  setPatientName]  = useState(routePatient?.name || '');
+  const [patientId,    setPatientId]    = useState(routePatient?.id   || '');
   const [result,       setResult]       = useState(null);
   const [errMsg,       setErrMsg]       = useState('');
+
+  // Case flow
+  const [showCaseModal, setShowCaseModal] = useState(false);
+  const [activeCaseId,  setActiveCaseId]  = useState(null);
+  const [activeCaseRef, setActiveCaseRef] = useState(null);
+  const [activeCaseType,setActiveCaseType]= useState(null);
+  const [isFollowUp,    setIsFollowUp]    = useState(false);
+  const [caseHistory,   setCaseHistory]   = useState([]);
+
+  // Generate a stable session reference ID for this recording session
+  const sessionRef = useRef((() => {
+    const now  = new Date();
+    const mm   = String(now.getMonth() + 1).padStart(2, '0');
+    const dd   = String(now.getDate()).padStart(2, '0');
+    const hh   = String(now.getHours()).padStart(2, '0');
+    const mn   = String(now.getMinutes()).padStart(2, '0');
+    const base = routePatient?.patientDbId || 'SES';
+    return `${base}-${mm}${dd}${hh}${mn}`;
+  })()).current;
+
+  // Transcript display language (translation)
+  const [displayLang,    setDisplayLang]    = useState('original');
+  const [translatedText, setTranslatedText] = useState({});
+  const [isTranslating,  setIsTranslating]  = useState(false);
+  const [translateError, setTranslateError] = useState(null);
+
+  // Reset display language when a new transcript arrives
+  useEffect(() => { setDisplayLang('original'); setTranslatedText({}); setTranslateError(null); }, [transcript]);
+
+  // Handle transcript display language change
+  const handleDisplayLang = async (lang) => {
+    if (lang === 'original') { setDisplayLang('original'); return; }
+    setTranslateError(null);
+    // Already fetched successfully — just switch
+    if (translatedText[lang] != null) { setDisplayLang(lang); return; }
+    // Start fetching: set isTranslating + displayLang in the same synchronous pass
+    // so React batches them into one render → spinner is shown before Text mounts
+    setIsTranslating(true);
+    setDisplayLang(lang);
+    try {
+      const result = await translateTranscript(transcript, lang);
+      setTranslatedText((prev) => ({ ...prev, [lang]: result || '' }));
+    } catch (e) {
+      setTranslateError(e.message || 'Translation failed');
+      setDisplayLang('original');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
 
   const timerRef      = useRef(null);
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -185,7 +239,8 @@ export default function RecordScreen() {
     if (!transcript.trim()) { Alert.alert('Empty', 'No transcript to process.'); return; }
     setStage(STAGE.EXTRACTING); setErrMsg('');
     try {
-      const extracted = await extractMedicalData(transcript, language);
+      // Pass case history for follow-up visits (RAG)
+      const extracted = await extractMedicalData(transcript, language, isFollowUp ? caseHistory : []);
       const saved     = await api.saveSession({
         rawTranscript: transcript,
         language,
@@ -194,7 +249,13 @@ export default function RecordScreen() {
         extractedData: extracted,
         patientName:   patientName.trim() || null,
         patientId:     patientId.trim()   || null,
+        doctorId:      routeDoctor?.id    || null,
+        requestId:     routeRequestId     || null,
+        caseId:        activeCaseId       || null,
       });
+      if (routeRequestId) {
+        try { await api.completeRequest(routeRequestId); } catch (_) {}
+      }
       setResult({ ...extracted, _id: saved?.id });
       setStage(STAGE.DONE);
     } catch (e) {
@@ -207,7 +268,9 @@ export default function RecordScreen() {
     setStage(STAGE.IDLE);
     setTranscript(''); setDetectedLang(null);
     setResult(null); setErrMsg(''); setTimer(0);
-    setPatientName(''); setPatientId('');
+    setPatientName(routePatient?.name || '');
+    setPatientId(routePatient?.id   || '');
+    // Don't reset case — stay in the same case context
   };
 
   if (!fontsLoaded) return null;
@@ -216,22 +279,38 @@ export default function RecordScreen() {
   const hasTranscript = transcript.length > 0;
 
   return (
-    <SafeAreaView style={s.safe} edges={['top']}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={s.scroll}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* HEADER */}
-        <View style={s.header}>
+    <>
+      <CaseSelectModal
+        visible={showCaseModal}
+        patient={routePatient}
+        doctor={routeDoctor}
+        onSelect={({ caseId, caseType, isFollowUp: fu, caseHistory: hist, caseRef }) => {
+          setActiveCaseId(caseId);
+          setActiveCaseRef(caseRef);
+          setActiveCaseType(caseType);
+          setIsFollowUp(fu);
+          setCaseHistory(hist);
+          setShowCaseModal(false);
+        }}
+        onClose={() => setShowCaseModal(false)}
+      />
+      <SafeAreaView style={s.safe} edges={['top']}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={s.scroll}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* HEADER */}
+          <View style={s.header}>
           <View>
-            <Text style={s.headerSub}>your voice</Text>
             <Text style={s.headerTitle}>Record</Text>
           </View>
           <TouchableOpacity style={s.resetBtn} onPress={reset} activeOpacity={0.7}>
             <Ionicons name="refresh-outline" size={16} color={C.dark} />
           </TouchableOpacity>
         </View>
+
+          {/* SESSION CONTEXT BANNER — removed, now fused into transcript card */}
 
         {/* LANGUAGE CHIPS */}
         <View style={s.langRow}>
@@ -309,20 +388,82 @@ export default function RecordScreen() {
           )}
         </View>
 
-        {/* TRANSCRIPT */}
+        {/* TRANSCRIPT + PATIENT — single fused card */}
         {(hasTranscript || (!isDone && stage === STAGE.IDLE)) && (
-          <>
-            <Text style={s.fieldLabel}>Transcript</Text>
-            <View style={s.transcriptCard}>
-              {detectedLang ? (
-                <View style={s.tagRow}>
-                  <View style={s.autoTag}>
-                    <Ionicons name="language-outline" size={11} color={C.dark} />
-                    <Text style={s.autoTagText}>{LANG_LABEL[detectedLang] || detectedLang.toUpperCase()}</Text>
-                  </View>
-                  <Text style={s.autoTagHint}>auto-detected</Text>
+          <View style={s.transcriptCard}>
+
+            {/* Pink patient header — top of card when patient context exists */}
+            {routePatient && (
+              <View style={s.fusedPatientBanner}>
+                <View style={s.ctxIconWrap}>
+                  <Ionicons name="person-circle-outline" size={20} color={C.dark} />
                 </View>
-              ) : null}
+                <View style={s.ctxBody}>
+                  <Text style={s.ctxLabel}>{activeCaseType ? (isFollowUp ? 'Follow-up' : 'New case') : 'Patient'}</Text>
+                  <Text style={s.ctxName}>{routePatient.name}</Text>
+                  {activeCaseType ? (
+                    <Text style={s.ctxCaseType}>{activeCaseType}</Text>
+                  ) : null}
+                </View>
+                <View style={s.ctxRight}>
+                  <Text style={s.ctxTime}>{new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</Text>
+                  <Text style={s.ctxDate}>{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Card header: Transcript label + detected lang + translation pills */}
+            <View style={s.transcriptHeader}>
+              <View style={s.tagRow}>
+                <Text style={s.transcriptLabel}>Transcript</Text>
+                {detectedLang ? (
+                  <>
+                    <View style={s.autoTag}>
+                      <Ionicons name="language-outline" size={11} color={C.dark} />
+                      <Text style={s.autoTagText}>{LANG_LABEL[detectedLang] || detectedLang.toUpperCase()}</Text>
+                    </View>
+                    <Text style={s.autoTagHint}>detected</Text>
+                  </>
+                ) : null}
+              </View>
+
+              {hasTranscript && (
+                <View style={s.dispLangRow}>
+                  {[
+                    { key: 'original', label: 'Original' },
+                    { key: 'hi',       label: 'हिंदी'    },
+                    { key: 'en',       label: 'English'  },
+                    { key: 'mr',       label: 'मराठी'   },
+                  ].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.key}
+                      style={[s.dispPill, displayLang === opt.key && s.dispPillActive]}
+                      onPress={() => handleDisplayLang(opt.key)}
+                      activeOpacity={0.75}
+                      disabled={isTranslating}
+                    >
+                      <Text style={[s.dispPillTxt, displayLang === opt.key && s.dispPillTxtActive]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {translateError ? (
+              <View style={s.translateErrRow}>
+                <Ionicons name="warning-outline" size={14} color="#b45309" />
+                <Text style={s.translateErrTxt}>{translateError}</Text>
+              </View>
+            ) : null}
+
+            {isTranslating ? (
+              <View style={s.translatingRow}>
+                <ActivityIndicator size="small" color={C.gray} />
+                <Text style={s.translatingTxt}>Translating…</Text>
+              </View>
+            ) : displayLang === 'original' ? (
               <TextInput
                 style={s.transcriptInput}
                 multiline
@@ -333,33 +474,66 @@ export default function RecordScreen() {
                 textAlignVertical="top"
                 editable={!isBusy && !isRecording && !isDone}
               />
-            </View>
-          </>
-        )}
+            ) : (
+              <Text style={[s.transcriptInput, { color: C.dark }]} selectable>
+                {translatedText[displayLang] != null ? translatedText[displayLang] : ''}
+              </Text>
+            )}
 
-        {/* PATIENT INFO */}
-        {hasTranscript && !isDone && (
-          <View style={s.patientRow}>
-            <View style={[s.patientBox, { flex: 3 }]}>
-              <Ionicons name="person-outline" size={14} color={C.muted} />
-              <TextInput
-                placeholder="Patient name"
-                placeholderTextColor={C.muted}
-                style={s.patientField}
-                value={patientName}
-                onChangeText={setPatientName}
-              />
-            </View>
-            <View style={[s.patientBox, { flex: 2 }]}>
-              <Ionicons name="card-outline" size={14} color={C.muted} />
-              <TextInput
-                placeholder="Patient ID"
-                placeholderTextColor={C.muted}
-                style={s.patientField}
-                value={patientId}
-                onChangeText={setPatientId}
-              />
-            </View>
+            {/* Patient row — always shown while session active */}
+            {!isDone && (
+              <>
+                <View style={s.cardDivider} />
+                <View style={s.patientRowFused}>
+                  {routePatient ? (
+                    /* Patient came from a card — show patient ID + session ref */
+                    <>
+                      <View style={s.patientBoxFused}>
+                        <Ionicons name="card-outline" size={14} color={C.muted} />
+                        <Text style={[s.patientField, { color: C.gray }]} numberOfLines={1}>
+                          {routePatient.patientDbId || routePatient.id}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[s.patientBoxFused, s.patientBoxFusedBorder]}
+                        onPress={() => setShowCaseModal(true)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="folder-outline" size={14} color={activeCaseRef ? C.gray : C.lime} />
+                        <Text style={[s.patientField, { color: activeCaseRef ? C.gray : C.dark }]} numberOfLines={1}>
+                          {activeCaseRef || 'Tap to select case'}
+                        </Text>
+                        {!activeCaseRef && <Ionicons name="chevron-forward" size={12} color={C.dark} style={{ marginLeft: 'auto' }} />}
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    /* Manual recording — editable name + ID */
+                    <>
+                      <View style={s.patientBoxFused}>
+                        <Ionicons name="person-outline" size={14} color={C.muted} />
+                        <TextInput
+                          placeholder="Patient name"
+                          placeholderTextColor={C.muted}
+                          style={s.patientField}
+                          value={patientName}
+                          onChangeText={setPatientName}
+                        />
+                      </View>
+                      <View style={[s.patientBoxFused, s.patientBoxFusedBorder]}>
+                        <Ionicons name="card-outline" size={14} color={C.muted} />
+                        <TextInput
+                          placeholder="Patient ID"
+                          placeholderTextColor={C.muted}
+                          style={s.patientField}
+                          value={patientId}
+                          onChangeText={setPatientId}
+                        />
+                      </View>
+                    </>
+                  )}
+                </View>
+              </>
+            )}
           </View>
         )}
 
@@ -503,8 +677,9 @@ export default function RecordScreen() {
         )}
 
         <View style={{ height: 110 }} />
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
+    </>
   );
 }
 
@@ -526,6 +701,17 @@ const s = StyleSheet.create({
   headerSub:   { fontSize: 12, fontFamily: 'SpaceGrotesk_500Medium', color: C.muted, letterSpacing: 0.5 },
   headerTitle: { fontSize: 38, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: -1.5, lineHeight: 42 },
   resetBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: C.white, justifyContent: 'center', alignItems: 'center' },
+
+  ctxBanner:   { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F5B8DB', borderRadius: 18, padding: 14, marginBottom: 16 },
+  fusedPatientBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F5B8DB', padding: 14 },
+  ctxCaseType: { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, opacity: 0.65, marginTop: 2 },
+  ctxIconWrap: { width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.08)', alignItems: 'center', justifyContent: 'center' },
+  ctxBody:     { flex: 1 },
+  ctxLabel:    { fontSize: 11, fontFamily: 'SpaceGrotesk_500Medium', color: C.dark, opacity: 0.7 },
+  ctxName:     { fontSize: 15, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  ctxRight:    { alignItems: 'flex-end' },
+  ctxTime:     { fontSize: 14, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  ctxDate:     { fontSize: 11, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, opacity: 0.7, marginTop: 2 },
 
   langRow:            { flexDirection: 'row', gap: 8, marginBottom: 28 },
   langChip:           { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 50, backgroundColor: C.white },
@@ -549,13 +735,28 @@ const s = StyleSheet.create({
   doneHint:     { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#3a6e00', marginTop: 6 },
 
   fieldLabel:      { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  transcriptCard:  { backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12 },
-  tagRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 12 },
+  transcriptCard:   { backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12 },
+  transcriptHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 12, flexWrap: 'wrap', gap: 8 },
+  transcriptLabel:  { fontSize: 12, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 0.8, marginRight: 8 },
+  tagRow:          { flexDirection: 'row', alignItems: 'center', gap: 8 },
   autoTag:         { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.lime, borderRadius: 50, paddingHorizontal: 11, paddingVertical: 5 },
   autoTagText:     { fontSize: 12, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
   autoTagHint:     { fontSize: 11, fontFamily: 'SpaceGrotesk_400Regular', color: C.muted },
+  dispLangRow:     { flexDirection: 'row', gap: 4 },
+  dispPill:        { borderRadius: 50, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: C.bg },
+  dispPillActive:  { backgroundColor: C.dark },
+  dispPillTxt:     { fontSize: 11, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray },
+  dispPillTxtActive:{ fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.white },
+  translatingRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, minHeight: 60 },
+  translatingTxt:  { fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.gray },
+  translateErrRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingBottom: 8, backgroundColor: '#fef3c7', borderRadius: 8, marginHorizontal: 10, marginBottom: 4 },
+  translateErrTxt: { flex: 1, fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: '#b45309', paddingTop: 8 },
   transcriptInput: { padding: 14, paddingTop: 10, fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, minHeight: 100, lineHeight: 22 },
 
+  cardDivider:     { height: 1, backgroundColor: C.bg, marginHorizontal: 0 },
+  patientRowFused: { flexDirection: 'row' },
+  patientBoxFused: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 12 },
+  patientBoxFusedBorder: { borderLeftWidth: 1, borderLeftColor: C.bg },
   patientRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   patientBox:  { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.white, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12 },
   patientField:{ flex: 1, fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark },

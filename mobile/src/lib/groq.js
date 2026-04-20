@@ -7,8 +7,9 @@ const LANG_MAP = { 'hi-IN': 'hi', 'mr-IN': 'mr', 'en-IN': 'en', hi: 'hi', mr: 'm
 
 // Seed prompts in the target language — strongly biases Whisper to output in that script
 const LANG_PROMPT = {
-  hi: 'डॉक्टर और मरीज़ के बीच चिकित्सा परामर्श। दवाओं, लक्षणों और निदान का उल्लेख हो सकता है।',
-  mr: 'डॉक्टर आणि रुग्ण यांच्यातील वैद्यकीय सल्लामसलत। औषधे, लक्षणे आणि निदानाचा उल्लेख असू शकतो।',
+  // Starts with explicit Devanagari script instruction — prevents Whisper from using Urdu/Nastaliq
+  hi: 'देवनागरी लिपि में लिखें। यह हिंदी में डॉक्टर और मरीज़ के बीच चिकित्सा परामर्श है। दवाओं, लक्षणों और निदान का उल्लेख हो सकता है। देवनागरी लिपि में लिखें।',
+  mr: 'देवनागरी लिपि वापरा। हे डॉक्टर आणि रुग्ण यांच्यातील मराठी वैद्यकीय संभाषण आहे। औषधे, लक्षणे आणि निदानाचा उल्लेख असू शकतो।',
   en: 'Medical consultation between doctor and patient. May include drug names, symptoms, and diagnosis.',
   default: 'Medical consultation between doctor and patient. May include Hindi, Marathi, or English terms.',
 };
@@ -73,7 +74,19 @@ export async function transcribeAudio(audioUri, languageCode) {
 }
 
 // ─── LLaMA 3 Medical Data Extraction ─────────────────────────────────────────
-export async function extractMedicalData(transcript, languageCode = 'hi-IN') {
+export async function extractMedicalData(transcript, languageCode = 'hi-IN', caseHistory = []) {
+  // Build case history block for RAG — injected only for follow-up visits
+  const historyBlock = caseHistory.length > 0
+    ? '\n\nPATIENT CASE HISTORY (' + caseHistory.length + ' previous visit(s)):\n' +
+      caseHistory.map((s, i) => {
+        const d    = new Date(s.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+        const syms = Array.isArray(s.extracted_data?.symptoms) ? s.extracted_data.symptoms.join(', ') : 'N/A';
+        const diag = s.extracted_data?.diagnosis || 'N/A';
+        const summ = s.extracted_data?.summary   || 'N/A';
+        return `Visit ${i + 1} (${d}): Symptoms: ${syms}. Diagnosis: ${diag}. Summary: ${summ}.`;
+      }).join('\n')
+    : '';
+
   const res = await fetch(`${GROQ_BASE}/chat/completions`, {
     method:  'POST',
     headers: {
@@ -81,14 +94,14 @@ export async function extractMedicalData(transcript, languageCode = 'hi-IN') {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model:           'llama3-70b-8192',
+      model:           'llama-3.3-70b-versatile',
       temperature:     0.1,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: MEDICAL_PROMPT },
         {
           role:    'user',
-          content: `Language hint: ${languageCode}\n\nTranscript:\n${transcript}`,
+          content: `Language hint: ${languageCode}${historyBlock}\n\nCurrent visit transcript:\n${transcript}`,
         },
       ],
     }),
@@ -121,4 +134,31 @@ export async function processAudio(audioUri, languageCode = 'hi-IN') {
     durationSecs:   stt.duration,
     extractedData:  extracted,
   };
+}
+
+// ─── Transcript Translation ───────────────────────────────────────────────────
+const LANG_NAME = { hi: 'Hindi', mr: 'Marathi', en: 'English' };
+
+export async function translateTranscript(text, targetLang) {
+  // targetLang: 'hi' | 'mr' | 'en'
+  if (!text?.trim()) return text;
+  const target = LANG_NAME[targetLang] || 'English';
+  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY}` },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a medical translator. Translate the given doctor-patient consultation transcript into ${target}. Preserve all medical terms, drug names, and numbers exactly. Return ONLY the translated text with no explanation, no prefix, no markdown.`,
+        },
+        { role: 'user', content: text },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Translation failed: ${res.status}`);
+  const json = await res.json();
+  return json.choices?.[0]?.message?.content?.trim() || text;
 }

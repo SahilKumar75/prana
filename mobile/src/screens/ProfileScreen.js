@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRole } from '../context/RoleContext';
 
 const C = {
   bg:    '#f2f3f5',
@@ -29,6 +30,7 @@ function InfoRow({ icon, label, value, last }) {
 }
 
 export default function ProfileScreen() {
+  const { profile, signOut } = useRole();
   return (
     <SafeAreaView style={s.container} edges={['top']}>
       <ScrollView
@@ -73,7 +75,11 @@ export default function ProfileScreen() {
         </View>
 
         {/* SIGN OUT */}
-        <TouchableOpacity style={s.signOutBtn} activeOpacity={0.8}>
+        <TouchableOpacity style={s.switchBtn} onPress={signOut} activeOpacity={0.8}>
+          <Ionicons name="swap-horizontal-outline" size={18} color={C.dark} />
+          <Text style={s.switchTxt}>Switch role</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.signOutBtn} onPress={signOut} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={18} color="#e57373" />
           <Text style={s.signOutTxt}>Sign out</Text>
         </TouchableOpacity>
@@ -112,6 +118,8 @@ const s = StyleSheet.create({
 
   signOutBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.white, borderRadius: 16, paddingVertical: 16, marginBottom: 20, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
   signOutTxt:      { fontSize: 15, fontWeight: '600', color: '#e57373' },
+  switchBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.white, borderRadius: 16, paddingVertical: 16, marginBottom: 10, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
+  switchTxt:       { fontSize: 15, fontWeight: '600', color: C.dark },
 
   version:         { textAlign: 'center', fontSize: 12, color: C.muted, marginBottom: 8 },
 });

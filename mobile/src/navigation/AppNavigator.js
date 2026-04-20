@@ -12,11 +12,18 @@ import HistoryScreen       from '../screens/HistoryScreen';
 import SettingsScreen      from '../screens/SettingsScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 import SessionDetailScreen from '../screens/SessionDetailScreen';
+import RoleSelectScreen    from '../screens/RoleSelectScreen';
+
+import PatientHomeScreen    from '../screens/patient/PatientHomeScreen';
+import PatientHistoryScreen from '../screens/patient/PatientHistoryScreen';
+import PatientProfileScreen from '../screens/patient/PatientProfileScreen';
+
+import { useRole } from '../context/RoleContext';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-const TABS = [
+const DOCTOR_TABS = [
   { name: 'Dashboard', label: 'Home',     filled: 'home',          outline: 'home-outline'          },
   { name: 'Record',    label: 'Record',   filled: 'mic',           outline: 'mic-outline'           },
   { name: 'History',   label: 'History',  filled: 'document-text', outline: 'document-text-outline' },
@@ -24,8 +31,14 @@ const TABS = [
   { name: 'Profile',   label: 'Profile',  filled: 'person',        outline: 'person-outline'        },
 ];
 
+const PATIENT_TABS = [
+  { name: 'PatientHome',    label: 'Home',    filled: 'home',          outline: 'home-outline'          },
+  { name: 'PatientHistory', label: 'History', filled: 'document-text', outline: 'document-text-outline' },
+  { name: 'PatientProfile', label: 'Profile', filled: 'person',        outline: 'person-outline'        },
+];
+
 // ─── Fully custom tab bar ────────────────────────────────────────────────────
-function CustomTabBar({ state, descriptors, navigation }) {
+function CustomTabBar({ state, descriptors, navigation, tabs }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -34,7 +47,7 @@ function CustomTabBar({ state, descriptors, navigation }) {
       <View style={styles.tabRow}>
         {state.routes.map((route, index) => {
           const focused = state.index === index;
-          const tab     = TABS[index];
+          const tab     = tabs[index];
 
           const onPress = () => {
             const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
@@ -68,33 +81,58 @@ function CustomTabBar({ state, descriptors, navigation }) {
   );
 }
 
-// ─── Tab navigator ───────────────────────────────────────────────────────────
-function MainTabs() {
+// ─── Doctor tab navigator ─────────────────────────────────────────────────────
+function DoctorTabs() {
   return (
     <Tab.Navigator
-      tabBar={(props) => <CustomTabBar {...props} />}
+      tabBar={(props) => <CustomTabBar {...props} tabs={DOCTOR_TABS} />}
       screenOptions={{ headerShown: false }}
       safeAreaInsets={{ bottom: 0 }}
     >
-      {TABS.map((tab) => (
-        <Tab.Screen key={tab.name} name={tab.name} component={
-          tab.name === 'Dashboard' ? DashboardScreen :
-          tab.name === 'Record'    ? RecordScreen    :
-          tab.name === 'History'   ? HistoryScreen   :
-          tab.name === 'Settings'  ? SettingsScreen  :
-          ProfileScreen
-        } />
-      ))}
+      <Tab.Screen name="Dashboard" component={DashboardScreen} />
+      <Tab.Screen name="Record"    component={RecordScreen}    />
+      <Tab.Screen name="History"   component={HistoryScreen}   />
+      <Tab.Screen name="Settings"  component={SettingsScreen}  />
+      <Tab.Screen name="Profile"   component={ProfileScreen}   />
+    </Tab.Navigator>
+  );
+}
+
+// ─── Patient tab navigator ────────────────────────────────────────────────────
+function PatientTabs() {
+  return (
+    <Tab.Navigator
+      tabBar={(props) => <CustomTabBar {...props} tabs={PATIENT_TABS} />}
+      screenOptions={{ headerShown: false }}
+      safeAreaInsets={{ bottom: 0 }}
+    >
+      <Tab.Screen name="PatientHome"    component={PatientHomeScreen}    />
+      <Tab.Screen name="PatientHistory" component={PatientHistoryScreen} />
+      <Tab.Screen name="PatientProfile" component={PatientProfileScreen} />
     </Tab.Navigator>
   );
 }
 
 export default function AppNavigator() {
+  const { role } = useRole();
+
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="MainTabs"      component={MainTabs}          />
-        <Stack.Screen name="SessionDetail" component={SessionDetailScreen} />
+        {!role ? (
+          // No role selected → show role picker
+          <Stack.Screen name="RoleSelect"    component={RoleSelectScreen} />
+        ) : role === 'doctor' ? (
+          <>
+            <Stack.Screen name="MainTabs"      component={DoctorTabs}          />
+            <Stack.Screen name="SessionDetail" component={SessionDetailScreen} />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="MainTabs"      component={PatientTabs}         />
+            <Stack.Screen name="SessionDetail" component={SessionDetailScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );
