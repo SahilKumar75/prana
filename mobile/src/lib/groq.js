@@ -123,42 +123,113 @@ Return ONLY the corrected transcript text. No explanation, no prefix, no markdow
 }
 
 // ─── Whisper Speech-to-Text ───────────────────────────────────────────────────
-export async function transcribeAudio(audioUri, languageCode) {
-  // languageCode is undefined for Auto — omit language + prompt so Whisper decodes freely
-  const lang   = languageCode ? (LANG_MAP[languageCode] || languageCode) : undefined;
-  // Only send a prompt when a language is explicitly chosen — avoids English bias in auto mode
-  const prompt = lang ? LANG_PROMPT[lang] : undefined;
+// ─── STT constants ────────────────────────────────────────────────────────────
+const DEEPGRAM_KEY  = process.env.EXPO_PUBLIC_DEEPGRAM_API_KEY;
+const SARVAM_KEY    = process.env.EXPO_PUBLIC_SARVAM_API_KEY;
 
+// ─── STT routing strategy ─────────────────────────────────────────────────────
+// mr-IN  → Sarvam (saarika:v2) — best Marathi ASR, purpose-built for Indian regional speech
+// hi-IN  → Deepgram nova-3-medical — strong Hindi medical vocabulary + smart_format
+// en-IN  → Deepgram nova-3-medical — most accurate English medical ASR
+// auto   → Deepgram (auto language detection) → fallback Groq Whisper on error
+// Any failure at primary → falls through to Groq Whisper as safety net
+
+async function transcribeWithDeepgram(audioUri, languageCode) {
+  // Map to Deepgram language codes; undefined = auto-detect
+  const langMap = { 'hi-IN': 'hi', 'en-IN': 'en-IN', hi: 'hi', en: 'en-IN' };
+  const lang    = languageCode ? (langMap[languageCode] || 'hi') : undefined;
+
+  const params = new URLSearchParams({
+    model:        'nova-3-medical',
+    punctuate:    'true',
+    smart_format: 'true',
+    diarize:      'false',  // we run our own diarization with LLM
+  });
+  if (lang) params.set('language', lang);
+
+  const res = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
+    method:  'POST',
+    headers: {
+      Authorization:  `Token ${DEEPGRAM_KEY}`,
+      'Content-Type': 'audio/m4a',
+    },
+    body: await fetch(audioUri).then(r => r.blob()),
+  });
+
+  if (!res.ok) throw new Error(`Deepgram STT failed: ${await res.text()}`);
+  const data       = await res.json();
+  const alt        = data.results?.channels?.[0]?.alternatives?.[0];
+  const detectedLang = data.results?.channels?.[0]?.detected_language || lang || 'en';
+  return {
+    text:     alt?.transcript || '',
+    language: detectedLang,
+    duration: data.metadata?.duration || 0,
+    segments: [],
+  };
+}
+
+async function transcribeWithSarvam(audioUri, languageCode) {
   const formData = new FormData();
   formData.append('file', {
     uri:  audioUri,
     type: 'audio/m4a',
     name: 'recording.m4a',
   });
-  formData.append('model', 'whisper-large-v3-turbo');
-  if (lang)   formData.append('language', lang);     // omit entirely for auto-detect
-  if (prompt) formData.append('prompt',   prompt);   // omit in auto mode to avoid English bias
-  formData.append('response_format', 'verbose_json');
+  formData.append('language_code', languageCode || 'mr-IN');
+  formData.append('model',         'saarika:v2');
+  formData.append('with_timestamps', 'false');
 
+  const res = await fetch('https://api.sarvam.ai/speech-to-text', {
+    method:  'POST',
+    headers: { 'api-subscription-key': SARVAM_KEY },
+    body:    formData,
+  });
+
+  if (!res.ok) throw new Error(`Sarvam STT failed: ${await res.text()}`);
+  const data = await res.json();
+  return {
+    text:     data.transcript || '',
+    language: languageCode || 'mr-IN',
+    duration: 0,
+    segments: [],
+  };
+}
+
+async function transcribeWithWhisper(audioUri, languageCode) {
+  const lang   = languageCode ? (LANG_MAP[languageCode] || languageCode) : undefined;
+  const prompt = lang ? LANG_PROMPT[lang] : undefined;
+  const formData = new FormData();
+  formData.append('file', { uri: audioUri, type: 'audio/m4a', name: 'recording.m4a' });
+  formData.append('model', 'whisper-large-v3-turbo');
+  if (lang)   formData.append('language', lang);
+  if (prompt) formData.append('prompt',   prompt);
+  formData.append('response_format', 'verbose_json');
   const res = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
     method:  'POST',
     headers: { Authorization: `Bearer ${GROQ_KEY}` },
     body:    formData,
   });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Whisper STT failed: ${err}`);
-  }
-
+  if (!res.ok) throw new Error(`Whisper STT failed: ${await res.text()}`);
   const data = await res.json();
-  return {
-    text:     data.text || '',
-    language: data.language || lang,
-    duration: data.duration || 0,   // seconds
-    segments: data.segments || [],
-  };
+  return { text: data.text || '', language: data.language || lang, duration: data.duration || 0, segments: data.segments || [] };
 }
+
+// ─── Main STT entry point (routes to best provider, falls back to Whisper) ───
+export async function transcribeAudio(audioUri, languageCode) {
+  // Marathi → Sarvam saarika:v2 (best regional Indian language support)
+  if (languageCode === 'mr-IN' || languageCode === 'mr') {
+    try { return await transcribeWithSarvam(audioUri, languageCode); } catch (_) {
+      console.warn('[STT] Sarvam failed, falling back to Whisper'); }
+  }
+  // English / Hindi / Auto → Deepgram nova-3-medical
+  if (!languageCode || languageCode === 'auto' || languageCode?.startsWith('hi') || languageCode?.startsWith('en')) {
+    try { return await transcribeWithDeepgram(audioUri, languageCode === 'auto' ? undefined : languageCode); } catch (_) {
+      console.warn('[STT] Deepgram failed, falling back to Whisper'); }
+  }
+  // Safety fallback: Groq Whisper (covers all other languages too)
+  return transcribeWithWhisper(audioUri, languageCode);
+}
+
 
 // ─── LLaMA 3 Medical Data Extraction ─────────────────────────────────────────
 export async function extractMedicalData(transcript, languageCode = 'hi-IN', caseHistory = []) {

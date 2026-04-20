@@ -331,8 +331,9 @@ export default function RecordScreen({ route, navigation }) {
         ? buildLabeledTranscript(diarizedLines)
         : null;
       const textForAI = labeledText || correctedTranscript || transcript;
-      // Pass case history for follow-up visits (RAG); also include any manually-added timeline context
-      const contextHistory = isFollowUp ? caseHistory : (timelineContext.length > 0 ? timelineContext : []);
+      // timelineContext is the single source of truth — it includes both manually
+      // selected timeline sessions AND auto-merged case history from follow-up cases.
+      const contextHistory = timelineContext.length > 0 ? timelineContext : (isFollowUp ? caseHistory : []);
       const extracted = await extractMedicalData(textForAI, language, contextHistory);
       const saved     = await api.saveSession({
         rawTranscript: transcript,
@@ -392,6 +393,15 @@ export default function RecordScreen({ route, navigation }) {
           setActiveCaseType(caseType);
           setIsFollowUp(fu);
           setCaseHistory(hist);
+          // Pre-populate timeline context with case history so doctor
+          // can see + toggle them from PatientTimeline without confusion
+          if (fu && hist?.length > 0) {
+            setTimelineContext(prev => {
+              const existingIds = new Set(prev.map(s => s.id));
+              const merged = [...prev, ...hist.filter(s => !existingIds.has(s.id))];
+              return merged;
+            });
+          }
           setShowCaseModal(false);
         }}
         onClose={() => setShowCaseModal(false)}
@@ -505,6 +515,8 @@ export default function RecordScreen({ route, navigation }) {
                 activeOpacity={0.8}
                 onPress={() => navigation.navigate('PatientTimeline', {
                   patient: routePatient,
+                  // Pass combined set so PatientTimeline shows case history sessions
+                  // and any manually-added sessions as pre-checked
                   selectedSessions: timelineContext,
                   onUpdateContext: (sessions) => setTimelineContext(sessions),
                 })}
