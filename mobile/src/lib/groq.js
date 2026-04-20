@@ -64,6 +64,7 @@ Return ONLY valid JSON. No markdown, no explanation, no text outside the JSON.
   "follow_up": "follow-up instruction stated by doctor, or null",
   "language_detected": "hi or mr or en — based on majority language of transcript",
   "missing_info": ["list ONLY critical clinical info that was absent but clinically required"],
+  "suggested_diagnoses": ["1-3 possible diagnoses the doctor may want to consider, based ONLY on symptoms explicitly present in the transcript. Only include this if 3 or more symptoms were stated. Else empty array. Do NOT suggest if a diagnosis was already stated."],
   "summary": "one sentence summary of what was ACTUALLY discussed, not inferred",
   "severity": "mild or moderate or severe — ONLY if doctor stated it; else null"
 }

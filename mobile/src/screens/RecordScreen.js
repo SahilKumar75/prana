@@ -445,68 +445,63 @@ export default function RecordScreen({ route, navigation }) {
           ))}
         </View>
 
-        {/* MIC ZONE */}
-        <View style={s.micZone}>
-          <View style={s.orbArea}>
-            {/* Glow halo — breathes with the orb */}
-            {isRecording && (
-              <Animated.View style={[s.orbGlow, {
-                opacity:   breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [0.45, 0.9] }),
-                transform: [{ scale: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [1, 1.45] }) }],
+        {/* VOICE ORB */}
+        <View style={s.orbZone}>
+          {/* Breathing glow rings — blue, expand + fade when recording */}
+          {isRecording && (
+            <>
+              <Animated.View style={[s.orbBreathRing, {
+                transform: [{ scale: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [1.22, 1.65] }) }],
+                opacity: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [0.28, 0.08] }),
               }]} />
-            )}
-            {/* Ripple rings — border circles that expand outward */}
-            {isRecording && (
-              <>
-                <Animated.View style={ringStyle(ripple1)} />
-                <Animated.View style={ringStyle(ripple2)} />
-                <Animated.View style={ringStyle(ripple3)} />
-              </>
-            )}
-            {/* Orb with breathe scale */}
-            <Animated.View style={{ transform: [{ scale: breatheAnim }] }}>
-              <TouchableOpacity
-                style={[s.micBtn, isRecording && s.micBtnActive]}
-                onPress={isRecording ? stopAndTranscribe : (isBusy ? null : startRecording)}
-                activeOpacity={0.88}
-                disabled={isBusy}
-              >
-                {isTranscribing
-                  ? <ActivityIndicator color={C.dark} size="large" />
-                  : <Ionicons
-                      name={isRecording ? 'stop' : 'mic'}
-                      size={42}
-                      color={isRecording ? C.white : C.dark}
-                    />
-                }
-              </TouchableOpacity>
-            </Animated.View>
-          </View>
-
-          {/* Status row: timer + equalizer bars OR hint text */}
-          {isRecording ? (
-            <View style={s.recStatus}>
-              <View style={s.timerRow}>
-                <View style={s.recDot} />
-                <Text style={s.timerText}>{fmtTimer(timer)}</Text>
-              </View>
-              <View style={s.eqRow}>
-                {barAnims.map((anim, i) => (
-                  <Animated.View key={i} style={[s.eqBar, { height: anim }]} />
-                ))}
-              </View>
-            </View>
-          ) : isTranscribing ? (
-            <Text style={s.statusHint}>Transcribing audio…</Text>
-          ) : isDiarizingStage ? (
-            <Text style={s.statusHint}>Identifying speakers…</Text>
-          ) : isCorrectingStage ? (
-            <Text style={s.statusHint}>Correcting transcript…</Text>
-          ) : isDone ? (
-            <Text style={s.doneHint}>Session saved ✓</Text>
-          ) : (
-            <Text style={s.tapHint}>tap to record</Text>
+              <Animated.View style={[s.orbBreathRing, {
+                transform: [{ scale: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [1.52, 1.95] }) }],
+                opacity: breatheAnim.interpolate({ inputRange: [1, 1.07], outputRange: [0.13, 0.03] }),
+              }]} />
+            </>
           )}
+
+          {/* Orb — blue watercolor layers, scale breathes when recording */}
+          <Animated.View style={[s.voiceOrb, { transform: [{ scale: breatheAnim }] }]}>
+            <View style={s.orbLayer1} />
+            <View style={s.orbLayer2} />
+            <View style={s.orbHighlight} />
+            <View style={s.orbAccent} />
+            {isBusy && (
+              <ActivityIndicator style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} color="rgba(255,255,255,0.85)" size="large" />
+            )}
+          </Animated.View>
+
+          {/* Touch target laid over orb */}
+          <TouchableOpacity
+            style={s.orbTouchTarget}
+            onPress={isRecording ? stopAndTranscribe : (isBusy ? null : startRecording)}
+            activeOpacity={0.9}
+            disabled={isBusy}
+          />
+
+          {/* Status / timer below orb */}
+          <View style={s.orbStatus}>
+            {isRecording ? (
+              <View style={s.timerRowNew}>
+                <View style={s.recDotNew} />
+                <Text style={s.timerTextNew}>{fmtTimer(timer)}</Text>
+                <View style={s.eqRowNew}>
+                  {barAnims.map((anim, i) => (
+                    <Animated.View key={i} style={[s.eqBarNew, { height: anim }]} />
+                  ))}
+                </View>
+              </View>
+            ) : isBusy ? (
+              <Text style={s.statusHintNew}>
+                {isTranscribing ? 'Transcribing…' : isDiarizingStage ? 'Identifying speakers…' : isCorrectingStage ? 'Correcting…' : 'Processing…'}
+              </Text>
+            ) : isDone ? (
+              <Text style={s.doneHintNew}>Saved ✓</Text>
+            ) : (
+              <Text style={s.tapHintNew}>Tap orb to record</Text>
+            )}
+          </View>
         </View>
 
         {/* TRANSCRIPT + PATIENT — single fused card */}
@@ -855,7 +850,7 @@ function VitalTile({ icon, label, value }) {
 }
 
 const s = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: C.bg },
+  safe:   { flex: 1, backgroundColor: '#ffffff' },
   scroll: { paddingHorizontal: 20 },
 
   header:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', paddingTop: 12, marginBottom: 20 },
@@ -895,6 +890,31 @@ const s = StyleSheet.create({
   tapHint:      { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.muted, marginTop: 6 },
   statusHint:   { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray, marginTop: 6 },
   doneHint:     { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#3a6e00', marginTop: 6 },
+
+  // ── Voice Orb (ChatGPT Voice style) ──────────────────────────────────────────
+  orbZone: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8, marginBottom: 12 },
+  voiceOrb: {
+    width: 200, height: 200, borderRadius: 100,
+    backgroundColor: '#b8dff5',
+    overflow: 'hidden',
+    shadowColor: '#4a9fd4', shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28, shadowRadius: 28, elevation: 10,
+  },
+  orbLayer1:   { position: 'absolute', top: 14, right: 12, width: 158, height: 148, borderRadius: 80, backgroundColor: '#8ec8ef', opacity: 0.72 },
+  orbLayer2:   { position: 'absolute', bottom: 18, left: 12, width: 125, height: 108, borderRadius: 62, backgroundColor: '#5aaee0', opacity: 0.38 },
+  orbHighlight:{ position: 'absolute', top: 26, left: 40, width: 90, height: 72, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.62)' },
+  orbAccent:   { position: 'absolute', bottom: 22, right: 20, width: 68, height: 58, borderRadius: 34, backgroundColor: 'rgba(28,96,188,0.26)' },
+  orbBreathRing:{ position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: '#b8dff5' },
+  orbTouchTarget:{ position: 'absolute', width: 200, height: 200, borderRadius: 100 },
+  orbStatus:   { marginTop: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
+  timerRowNew: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  recDotNew:   { width: 7, height: 7, borderRadius: 4, backgroundColor: '#e74c3c' },
+  timerTextNew:{ fontSize: 22, fontFamily: 'SpaceGrotesk_700Bold', color: '#202020', letterSpacing: 2 },
+  eqRowNew:    { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 30, marginLeft: 4 },
+  eqBarNew:    { width: 4, borderRadius: 2, backgroundColor: '#5aaee0' },
+  tapHintNew:  { fontSize: 14, fontFamily: 'SpaceGrotesk_500Medium', color: '#bbbbbe' },
+  statusHintNew:{ fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#888888' },
+  doneHintNew: { fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#3a6e00' },
 
   fieldLabel:      { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
   transcriptCard:   { backgroundColor: C.white, borderRadius: 18, overflow: 'hidden', marginBottom: 12 },

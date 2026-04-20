@@ -21,7 +21,7 @@ const C = {
   white: '#ffffff',
   dark:  '#202020',
   lime:  '#c9f158',
-  pink:  '#F5B8DB',
+  pink:  '#FBBF24',
   gray:  '#888888',
   muted: '#bbbbbe',
 };

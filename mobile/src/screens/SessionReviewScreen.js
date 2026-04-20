@@ -188,16 +188,20 @@ export default function SessionReviewScreen({ route, navigation }) {
   const [saving,          setSaving]          = useState(false);
 
   const sessionId = session?.id || sessionRef || '—';
+  const suggestedDiagnoses = initialExtracted?.suggested_diagnoses || [];
 
-  // Compute which fields are missing (empty after AI extraction)
-  const missingFields = [
-    !diagnosis       && 'Diagnosis',
-    !severity        && 'Severity',
-    symptoms.length === 0 && 'Symptoms',
+  // Criticality: flag fields the patient absolutely needs before leaving
+  const criticalMissing = [
+    !diagnosis         && 'Diagnosis',
     medications.length === 0 && 'Medications',
-    !followUp        && 'Follow-up',
-    !summary         && 'Summary',
   ].filter(Boolean);
+  const warnMissing = [
+    !severity          && 'Severity',
+    symptoms.length === 0 && 'Symptoms',
+    !followUp          && 'Follow-up',
+    !summary           && 'Summary',
+  ].filter(Boolean);
+  const missingFields = [...criticalMissing, ...warnMissing];
 
   const addMedication = () => {
     setMedications(prev => [...prev, {
@@ -279,13 +283,54 @@ export default function SessionReviewScreen({ route, navigation }) {
             <View style={s.missingBox}>
               <View style={s.missingHeader}>
                 <Ionicons name="alert-circle-outline" size={15} color="#b45309" />
-                <Text style={s.missingTitle}>Missing details — please fill in</Text>
+                <Text style={s.missingTitle}>Before patient leaves — please fill in</Text>
               </View>
-              <View style={s.missingChips}>
-                {missingFields.map(f => (
-                  <View key={f} style={s.missingChip}>
-                    <Text style={s.missingChipTxt}>{f}</Text>
+              {criticalMissing.length > 0 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={s.missingGroupLabel}>🚨 Critical</Text>
+                  <View style={s.missingChips}>
+                    {criticalMissing.map(f => (
+                      <View key={f} style={[s.missingChip, { borderColor: '#ef4444', backgroundColor: '#fef2f2' }]}>
+                        <Text style={[s.missingChipTxt, { color: '#b91c1c' }]}>{f}</Text>
+                      </View>
+                    ))}
                   </View>
+                </View>
+              )}
+              {warnMissing.length > 0 && (
+                <View>
+                  <Text style={s.missingGroupLabel}>⚠️ Recommended</Text>
+                  <View style={s.missingChips}>
+                    {warnMissing.map(f => (
+                      <View key={f} style={s.missingChip}>
+                        <Text style={s.missingChipTxt}>{f}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* ── AI suggested diagnoses (shown only when diagnosis is empty) ── */}
+          {suggestedDiagnoses.length > 0 && !diagnosis && (
+            <View style={s.suggestBox}>
+              <View style={s.suggestHeader}>
+                <Ionicons name="bulb-outline" size={15} color="#1d4ed8" />
+                <Text style={s.suggestTitle}>AI — Possible diagnoses based on symptoms</Text>
+              </View>
+              <Text style={s.suggestSub}>Tap to pre-fill diagnosis field</Text>
+              <View style={s.suggestChips}>
+                {suggestedDiagnoses.map((d, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={s.suggestChip}
+                    onPress={() => setDiagnosis(d)}
+                    activeOpacity={0.75}
+                  >
+                    <Ionicons name="add" size={13} color="#1d4ed8" />
+                    <Text style={s.suggestChipTxt}>{d}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
             </View>
@@ -520,9 +565,18 @@ const s = StyleSheet.create({
   missingBox:    { backgroundColor: '#fffbeb', borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#fde68a' },
   missingHeader: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
   missingTitle:  { fontSize: 13, fontFamily: 'SpaceGrotesk_700Bold', color: '#b45309' },
+  missingGroupLabel: { fontSize: 10, fontFamily: 'SpaceGrotesk_700Bold', color: '#92400e', letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' },
   missingChips:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   missingChip:   { backgroundColor: '#fef3c7', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: '#fcd34d' },
   missingChipTxt:{ fontSize: 12, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#92400e' },
+
+  suggestBox:    { backgroundColor: '#eff6ff', borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#bfdbfe' },
+  suggestHeader: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 4 },
+  suggestTitle:  { fontSize: 13, fontFamily: 'SpaceGrotesk_700Bold', color: '#1e3a8a', flex: 1 },
+  suggestSub:    { fontSize: 11, fontFamily: 'SpaceGrotesk_400Regular', color: '#3b82f6', marginBottom: 10 },
+  suggestChips:  { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  suggestChip:   { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#dbeafe', borderRadius: 50, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: '#93c5fd' },
+  suggestChipTxt:{ fontSize: 13, fontFamily: 'SpaceGrotesk_600SemiBold', color: '#1d4ed8' },
 
   fuToggleCard:  { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 18, padding: 16, marginBottom: 14, gap: 12 },
   fuToggleLeft:  { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
