@@ -331,4 +331,13 @@ export const api = {
       .eq('id', caseId);
     if (error) throw new Error(error.message);
   },
+
+  updateSession: async (sessionId, fields) => {
+    if (!sessionId) return;
+    const { error } = await supabase
+      .from('sessions')
+      .update(fields)
+      .eq('id', sessionId);
+    if (error) throw new Error(error.message);
+  },
 };

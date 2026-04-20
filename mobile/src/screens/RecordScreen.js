@@ -352,6 +352,13 @@ export default function RecordScreen({ route, navigation }) {
       }
       setResult({ ...extracted, _id: saved?.id });
       setStage(STAGE.DONE);
+      // Navigate to SessionReview for manual editing
+      navigation.navigate('SessionReview', {
+        session:     saved || { id: null },
+        extracted,
+        sessionRef,
+        patientName: routePatient?.name || patientName.trim() || null,
+      });
     } catch (e) {
       setErrMsg(e.message || 'AI processing failed.');
       setStage(STAGE.ERROR);

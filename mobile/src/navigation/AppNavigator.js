@@ -13,6 +13,7 @@ import SettingsScreen      from '../screens/SettingsScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 import SessionDetailScreen    from '../screens/SessionDetailScreen';
 import PatientTimelineScreen  from '../screens/PatientTimelineScreen';
+import SessionReviewScreen    from '../screens/SessionReviewScreen';
 import RoleSelectScreen    from '../screens/RoleSelectScreen';
 
 import PatientHomeScreen    from '../screens/patient/PatientHomeScreen';
@@ -128,12 +129,14 @@ export default function AppNavigator() {
             <Stack.Screen name="MainTabs"      component={DoctorTabs}          />
             <Stack.Screen name="SessionDetail"     component={SessionDetailScreen}    />
             <Stack.Screen name="PatientTimeline"   component={PatientTimelineScreen}  />
+            <Stack.Screen name="SessionReview"     component={SessionReviewScreen}    />
           </>
         ) : (
           <>
             <Stack.Screen name="MainTabs"           component={PatientTabs}            />
             <Stack.Screen name="SessionDetail"      component={SessionDetailScreen}    />
             <Stack.Screen name="PatientTimeline"    component={PatientTimelineScreen}  />
+            <Stack.Screen name="SessionReview"      component={SessionReviewScreen}    />
           </>
         )}
       </Stack.Navigator>
