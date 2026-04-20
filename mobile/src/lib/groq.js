@@ -36,9 +36,10 @@ For medications: capture ALL drugs, even if mentioned by Indian brand names or c
 
 // ─── Whisper Speech-to-Text ───────────────────────────────────────────────────
 export async function transcribeAudio(audioUri, languageCode) {
-  // languageCode is undefined for Auto — omit the language param so Whisper auto-detects
+  // languageCode is undefined for Auto — omit language + prompt so Whisper decodes freely
   const lang   = languageCode ? (LANG_MAP[languageCode] || languageCode) : undefined;
-  const prompt = LANG_PROMPT[lang] || LANG_PROMPT.default;
+  // Only send a prompt when a language is explicitly chosen — avoids English bias in auto mode
+  const prompt = lang ? LANG_PROMPT[lang] : undefined;
 
   const formData = new FormData();
   formData.append('file', {
@@ -47,9 +48,9 @@ export async function transcribeAudio(audioUri, languageCode) {
     name: 'recording.m4a',
   });
   formData.append('model', 'whisper-large-v3-turbo');
-  if (lang) formData.append('language', lang); // omit entirely for auto-detect
+  if (lang)   formData.append('language', lang);     // omit entirely for auto-detect
+  if (prompt) formData.append('prompt',   prompt);   // omit in auto mode to avoid English bias
   formData.append('response_format', 'verbose_json');
-  formData.append('prompt', prompt);
 
   const res = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
     method:  'POST',
