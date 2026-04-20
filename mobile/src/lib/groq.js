@@ -14,39 +14,63 @@ const LANG_PROMPT = {
   default: 'Medical consultation between doctor and patient. May include Hindi, Marathi, or English terms.',
 };
 
-const MEDICAL_PROMPT = `You are a clinical AI assistant for Indian hospitals. A doctor-patient consultation transcript is given (may be Hindi, Marathi, English, or code-switched mid-sentence).
+const MEDICAL_PROMPT = `You are a strict clinical transcription parser for Indian hospitals. Your ONLY job is to extract information EXPLICITLY STATED in the transcript. You are NOT a doctor. You do NOT suggest, infer, or fill typical values.
 
-IMPORTANT: If the transcript contains speaker labels like "Dr. [Name]:" or "[Patient Name]:", use them to correctly assign:
-- Symptoms, complaints, pain, duration → spoken by PATIENT
-- Diagnosis, prescriptions, instructions, dosage → spoken by DOCTOR
-Never attribute symptoms to the doctor or prescriptions to the patient.
+━━━ ABSOLUTE ZERO-HALLUCINATION RULES ━━━
+These rules override everything else. Violation causes patient harm.
 
-Extract ALL clinical information and return ONLY a valid JSON object — no markdown, no explanation.
+1. MEDICATIONS — If a drug name was NOT spoken aloud in this transcript, do NOT include it. Empty array = correct. Do not "helpfully" add Paracetamol, Crocin, or any other drug.
+2. SYMPTOMS — Only extract complaints that the PATIENT explicitly described. Never infer symptoms from the diagnosis.
+3. DURATION — "3 days", "5 days", "1 week" must appear verbatim or as a clear spoken phrase in the transcript. If no duration was mentioned, duration = null.
+4. DIAGNOSIS — Must be stated by the doctor. Do not guess from symptoms.
+5. SHORT/UNCLEAR TRANSCRIPTS — If the transcript is fewer than 50 words, mostly noise, or clearly incomplete, return all nulls and empty arrays. Do not fabricate content.
+6. DO NOT USE DEFAULT VALUES — Never output a "typical" value for anything. If it was not said, it does not exist.
 
-JSON structure (use null for missing fields, empty array [] for missing lists):
+━━━ HOW TO EXTRACT ━━━
+Step 1 — Identify speaker turns. Lines starting with "Dr." or a doctor name = doctor. Lines starting with a patient name or "Patient:" = patient.
+Step 2 — For each field, ask: "Was this EXPLICITLY said in this transcript?" If no → null or [].
+Step 3 — Build the JSON using only what passed Step 2.
+
+━━━ ATTRIBUTION ━━━
+Symptoms, complaints, pain, duration-of-symptoms → patient utterances ONLY
+Diagnosis, medications, dosage, instructions, follow-up → doctor utterances ONLY
+Never flip attribution.
+
+━━━ OUTPUT FORMAT ━━━
+Return ONLY valid JSON. No markdown, no explanation, no text outside the JSON.
+
 {
-  "patient_name": "string or null",
-  "symptoms": ["list of symptoms — extract ONLY from patient utterances"],
-  "symptom_duration": "how long symptoms have been present or null",
-  "diagnosis": "suspected or confirmed diagnosis — extract ONLY from doctor utterances or null",
-  "medications": [{"name": "generic drug name", "prescription_name": "brand/trade name if mentioned or null", "dose_mg": "numeric dose in mg or null", "dosage": "full dosage string e.g. 500mg", "frequency": "timing e.g. twice daily", "duration": "e.g. 5 days or null"}],
-  "allergies": ["list or empty"],
-  "vitals": {"bp": "string or null", "temp": "string or null", "pulse": "string or null", "spo2": "string or null"},
-  "follow_up": "follow-up instructions or null",
-  "language_detected": "hi or mr or en",
-  "missing_info": ["list of critical clinical info that was NOT mentioned but should be asked"],
-  "summary": "one-sentence clinical summary in English",
-  "severity": "mild or moderate or severe"
+  "patient_name": "string extracted from transcript, or null",
+  "symptoms": ["ONLY symptoms the patient explicitly described — empty array if none"],
+  "symptom_duration": "exact phrase spoken by patient, or null",
+  "diagnosis": "exact diagnosis stated by doctor, or null",
+  "medications": [
+    {
+      "name": "generic drug name — MUST be explicitly named in transcript",
+      "prescription_name": "brand name if spoken, or null",
+      "dose_mg": "numeric string e.g. '500', or null — ONLY if spoken",
+      "dosage": "full dosage string as spoken, or null",
+      "frequency": "exact timing as spoken e.g. 'twice daily' — null if not said",
+      "duration": "exact duration as spoken e.g. '5 days' — null if not said"
+    }
+  ],
+  "allergies": ["only if explicitly mentioned by patient or doctor — else empty"],
+  "vitals": {
+    "bp": "null unless a blood pressure reading was stated",
+    "temp": "null unless a temperature reading was stated",
+    "pulse": "null unless a pulse reading was stated",
+    "spo2": "null unless an SpO2 reading was stated"
+  },
+  "follow_up": "follow-up instruction stated by doctor, or null",
+  "language_detected": "hi or mr or en — based on majority language of transcript",
+  "missing_info": ["list ONLY critical clinical info that was absent but clinically required"],
+  "summary": "one sentence summary of what was ACTUALLY discussed, not inferred",
+  "severity": "mild or moderate or severe — ONLY if doctor stated it; else null"
 }
 
-Medication rules:
-- Extract ALL drugs mentioned by the doctor, even Indian brand names (Crocin=Paracetamol, Combiflam=Ibuprofen+Paracetamol, Pan=Pantoprazole)
-- dose_mg: numeric only (e.g. "500" not "500mg")
-- frequency must be specific: "twice daily", "three times a day", "at bedtime", "every 8 hours"
-- duration: always include if mentioned ("5 days", "1 week", "10 days")
-- If only brand name given, set prescription_name = brand, name = known generic
+Indian drug name mappings (use ONLY when brand name was spoken):
+Crocin/Dolo → Paracetamol | Combiflam → Ibuprofen+Paracetamol | Pan/Pantop → Pantoprazole | Augmentin → Amoxicillin+Clavulanate | Asthalin → Salbutamol | Becosules → B-complex`;
 
-For missing_info: flag anything clinically critical not mentioned — allergy history, vitals, diagnosis confirmation, medication dosage, duration of illness.`;
 
 // ─── Build speaker-labeled transcript from diarized lines ─────────────────────
 // Converts [{speaker, name, text}] → "Dr. Arjun: ...\nPriya: ..."
@@ -154,7 +178,7 @@ export async function extractMedicalData(transcript, languageCode = 'hi-IN', cas
     },
     body: JSON.stringify({
       model:           'llama-3.3-70b-versatile',
-      temperature:     0.1,
+      temperature:     0,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: MEDICAL_PROMPT },
@@ -174,13 +198,55 @@ export async function extractMedicalData(transcript, languageCode = 'hi-IN', cas
   const data    = await res.json();
   const content = data.choices[0].message.content;
 
+  let parsed;
   try {
-    return JSON.parse(content);
+    parsed = JSON.parse(content);
   } catch {
-    // Strip any accidental markdown fences
     const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    return JSON.parse(cleaned);
+    parsed = JSON.parse(cleaned);
   }
+  return validateExtraction(parsed, transcript);
+}
+
+// ─── Post-extraction grounding validator ─────────────────────────────────────
+// Removes any field value that has NO textual evidence in the original transcript.
+// Prevents the model from hallucinating default values (e.g. Paracetamol / 3 days).
+function validateExtraction(data, transcript) {
+  if (!data || !transcript) return data;
+  const tx = transcript.toLowerCase();
+
+  // Strip medications with zero evidence — name must appear in transcript (any form)
+  if (Array.isArray(data.medications)) {
+    data.medications = data.medications.filter(med => {
+      const name  = (med.name              || '').toLowerCase();
+      const brand = (med.prescription_name || '').toLowerCase();
+      const dosage= (med.dosage            || '').toLowerCase();
+      // Accept if any token from the drug name appears in the transcript
+      const nameTokens  = name.split(/[\s,+]+/).filter(t => t.length > 3);
+      const brandTokens = brand.split(/[\s,+]+/).filter(t => t.length > 3);
+      const allTokens   = [...nameTokens, ...brandTokens];
+      if (allTokens.length === 0) return false;
+      return allTokens.some(token => tx.includes(token));
+    });
+  }
+
+  // Strip symptoms with zero evidence — at least one word must be in transcript
+  if (Array.isArray(data.symptoms)) {
+    data.symptoms = data.symptoms.filter(sym => {
+      const tokens = sym.toLowerCase().split(/\s+/).filter(t => t.length > 3);
+      return tokens.length === 0 || tokens.some(t => tx.includes(t));
+    });
+  }
+
+  // Strip duration if no numeric or duration keyword found in transcript
+  if (data.symptom_duration) {
+    const durationKeywords = /\d|days?|weeks?|months?|din|hafte|mahine|subah|raat|ghante|hours?/i;
+    if (!durationKeywords.test(transcript) && !durationKeywords.test(data.symptom_duration)) {
+      data.symptom_duration = null;
+    }
+  }
+
+  return data;
 }
 
 // ─── Full pipeline: STT → LLM extract ────────────────────────────────────────
@@ -193,17 +259,6 @@ export async function processAudio(audioUri, languageCode = 'hi-IN') {
     durationSecs:   stt.duration,
     extractedData:  extracted,
   };
-}
-
-// ─── Build speaker-labeled transcript ────────────────────────────────────────
-// "Dr. Arjun: ...\nPriya: ..." → extractMedicalData uses labels to correctly
-// attribute symptoms (patient utterances) vs prescriptions (doctor utterances).
-export function buildLabeledTranscript(lines) {
-  if (!lines || lines.length === 0) return '';
-  return lines
-    .filter(l => l.text?.trim())
-    .map(l => `${l.name}: ${l.text.trim()}`)
-    .join('\n');
 }
 
 // ─── Speaker Diarization ─────────────────────────────────────────────────────
