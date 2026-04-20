@@ -1,15 +1,15 @@
 import { supabase } from './supabase';
 
-// ── Health check — ping Supabase with a lightweight query ──────────────────
+// ── Health check ────────────────────────────────────────────────────────────
 export async function checkHealth() {
   const { error } = await supabase.from('sessions').select('id').limit(1);
   if (error) throw new Error(error.message);
   return true;
 }
 
-// ── Sessions ───────────────────────────────────────────────────────────────
+// ── Sessions API ────────────────────────────────────────────────────────────
 export const api = {
-  // Return all sessions ordered newest first
+
   getSessions: async () => {
     const { data, error } = await supabase
       .from('sessions')
@@ -19,11 +19,8 @@ export const api = {
     return data;
   },
 
-  // Compute stats from sessions table
   getStats: async () => {
-    const { data, error } = await supabase
-      .from('sessions')
-      .select('id, status');
+    const { data, error } = await supabase.from('sessions').select('id, status');
     if (error) throw new Error(error.message);
     return {
       total:     data.length,
@@ -33,14 +30,36 @@ export const api = {
     };
   },
 
-  // Insert a new session row
-  createSession: async (rawTranscript, language = 'hi-IN') => {
+  // Save a fully-processed session (transcript + extracted medical data)
+  saveSession: async ({
+    rawTranscript,
+    language       = 'hi-IN',
+    detectedLang   = null,
+    durationSecs   = null,
+    extractedData  = null,
+    patientName    = null,
+    patientId      = null,
+  }) => {
     const { data, error } = await supabase
       .from('sessions')
-      .insert([{ raw_transcript: rawTranscript, language, status: 'pending' }])
+      .insert([{
+        raw_transcript:    rawTranscript,
+        language,
+        detected_language: detectedLang || language,
+        duration_seconds:  durationSecs ? Math.round(durationSecs) : null,
+        extracted_data:    extractedData,
+        patient_name:      patientName || extractedData?.patient_name || null,
+        patient_id:        patientId,
+        status:            extractedData ? 'processed' : 'pending',
+      }])
       .select()
       .single();
     if (error) throw new Error(error.message);
     return data;
+  },
+
+  // Legacy — kept for compatibility
+  createSession: async (rawTranscript, language = 'hi-IN') => {
+    return api.saveSession({ rawTranscript, language });
   },
 };

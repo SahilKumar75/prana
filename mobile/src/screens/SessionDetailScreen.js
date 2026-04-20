@@ -1,12 +1,31 @@
 import React from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  useFonts,
+  SpaceGrotesk_400Regular,
+  SpaceGrotesk_500Medium,
+  SpaceGrotesk_600SemiBold,
+  SpaceGrotesk_700Bold,
+} from '@expo-google-fonts/space-grotesk';
 
-const statusIcon  = (s) => ({ processed: 'checkmark-circle', error: 'close-circle', pending: 'time-outline' }[s] || 'time-outline');
-const statusColor = (s) => ({ processed: '#9AAB63', error: '#e57373', pending: '#c09a1a' }[s] || '#bbb');
+const C = {
+  bg:    '#f2f3f5',
+  white: '#ffffff',
+  dark:  '#202020',
+  lime:  '#c9f158',
+  gray:  '#888888',
+  muted: '#bbbbbe',
+  red:   '#e57373',
+  warn:  '#fff8e1',
+  warnB: '#f59e0b',
+};
+
+const statusColor = (s) => ({ processed: '#3a6e00', error: '#c0392b', pending: '#7a5c00' }[s] || C.gray);
+const statusBg    = (s) => ({ processed: C.lime,    error: '#fce8e6',  pending: '#fff8e1' }[s] || C.bg);
 const statusLabel = (s) => ({ processed: 'Processed', error: 'Error', pending: 'Pending' }[s] || s || 'Pending');
 
 const fmt = (iso) => {
@@ -18,148 +37,264 @@ const fmt = (iso) => {
 };
 
 export default function SessionDetailScreen({ route, navigation }) {
-  const { session, accent = '#F5B8DB' } = route.params;
-  const accentLight = accent + '22';
+  const [fontsLoaded] = useFonts({
+    SpaceGrotesk_400Regular,
+    SpaceGrotesk_500Medium,
+    SpaceGrotesk_600SemiBold,
+    SpaceGrotesk_700Bold,
+  });
 
-  const entities = session.processed_data?.entities || session.ai_entities || [];
-  const summary  = session.processed_data?.summary || session.ai_summary || null;
-  const lang     = (session.language || 'hi-IN').split('-')[0].toUpperCase();
+  const { session } = route.params;
+  const d = session.extracted_data || session.processed_data || {};
 
-  const copyToClipboard = () => {
-    Alert.alert('Copied', 'Transcript copied to clipboard.');
-  };
+  const symptoms    = d.symptoms     || [];
+  const medications = d.medications  || [];
+  const missing     = d.missing_info || [];
+  const vitals      = d.vitals       || {};
 
-  const share = () => {
-    Alert.alert('Share', 'Share functionality coming soon.');
-  };
+  if (!fontsLoaded) return null;
 
   return (
-    <SafeAreaView style={[styles.container]} edges={['top']}>
-      {/* HEADER AREA */}
-      <View style={[styles.headerArea, { backgroundColor: accentLight }]}>
-        {/* Back button */}
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-          <Ionicons name="arrow-back-outline" size={16} color="#1A1A1A" />
-          <Text style={styles.backText}>Back</Text>
+    <SafeAreaView style={s.container} edges={['top', 'bottom']}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
+
+        {/* BACK */}
+        <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+          <Ionicons name="arrow-back-outline" size={18} color={C.dark} />
+          <Text style={s.backText}>Back</Text>
         </TouchableOpacity>
 
-        {/* Status badge */}
-        <View style={[styles.statusBadge, { backgroundColor: accent + '33', marginTop: 12 }]}>
-          <Ionicons name={statusIcon(session.status)} size={13} color={statusColor(session.status)} />
-          <Text style={[styles.statusText, { color: statusColor(session.status) }]}>
-            {statusLabel(session.status)}
-          </Text>
-        </View>
-
-        {/* Date + language */}
-        <Text style={styles.headerMeta}>{fmt(session.created_at)}  ·  {lang}</Text>
-
-        {/* Session ID */}
-        <Text style={styles.sessionId}>ID: {session.id}</Text>
-      </View>
-
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scroll}
-      >
-        {/* TRANSCRIPT */}
-        <Text style={styles.sectionLabel}>TRANSCRIPT</Text>
-        <View style={styles.card}>
-          {session.raw_transcript ? (
-            <Text style={styles.transcriptText}>{session.raw_transcript}</Text>
-          ) : (
-            <Text style={styles.transcriptEmpty}>No transcript recorded</Text>
-          )}
-        </View>
-
-        {/* AI INSIGHTS */}
-        {(entities.length > 0 || summary) && (
-          <>
-            <Text style={styles.sectionLabel}>AI INSIGHTS</Text>
-            {entities.length > 0 && (
-              <View style={styles.chipRow}>
-                {entities.map((e, i) => (
-                  <View key={i} style={styles.entityChip}>
-                    <Text style={styles.entityText}>{e.text || e}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-            {summary && <Text style={styles.summaryText}>{summary}</Text>}
-          </>
-        )}
-
-        {/* METADATA CARD */}
-        <View style={[styles.metaCard, { backgroundColor: accent + '22' }]}>
-          <View style={styles.metaGrid}>
-            <View style={styles.metaItem}>
-              <Text style={styles.metaKey}>Language</Text>
-              <Text style={styles.metaVal}>{lang}</Text>
-            </View>
-            <View style={styles.metaItem}>
-              <Text style={styles.metaKey}>Status</Text>
-              <Text style={styles.metaVal}>{statusLabel(session.status)}</Text>
-            </View>
-            <View style={styles.metaItem}>
-              <Text style={styles.metaKey}>Date</Text>
-              <Text style={styles.metaVal}>{fmt(session.created_at)}</Text>
-            </View>
+        {/* TITLE ROW */}
+        <View style={s.titleRow}>
+          <Text style={s.pageTitle}>Session Detail</Text>
+          <View style={[s.statusBadge, { backgroundColor: statusBg(session.status) }]}>
+            <Text style={[s.statusText, { color: statusColor(session.status) }]}>{statusLabel(session.status)}</Text>
           </View>
         </View>
 
-        {/* ACTIONS */}
-        <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.actionPill} onPress={share} activeOpacity={0.85}>
-            <Ionicons name="share-outline" size={16} color="#fff" />
-            <Text style={styles.actionPillText}>Share</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionOutline} onPress={copyToClipboard} activeOpacity={0.8}>
-            <Ionicons name="copy-outline" size={16} color="#1A1A1A" />
-            <Text style={styles.actionOutlineText}>Copy</Text>
-          </TouchableOpacity>
+        {/* META */}
+        <View style={s.metaRow}>
+          <Ionicons name="calendar-outline" size={14} color={C.muted} />
+          <Text style={s.metaText}>{fmt(session.created_at)}</Text>
+          {(session.detected_language || session.language) && (
+            <>
+              <Text style={s.metaDot}>·</Text>
+              <Text style={s.metaText}>{(session.detected_language || session.language).toUpperCase()}</Text>
+            </>
+          )}
+          {session.duration_seconds && (
+            <>
+              <Text style={s.metaDot}>·</Text>
+              <Text style={s.metaText}>{Math.round(session.duration_seconds)} sec</Text>
+            </>
+          )}
         </View>
 
-        <View style={{ height: 120 }} />
+        {/* SUMMARY CARD */}
+        {d.summary && (
+          <View style={s.summaryCard}>
+            <Text style={s.summaryText}>{d.summary}</Text>
+          </View>
+        )}
+
+        {/* PATIENT + SEVERITY */}
+        {(session.patient_name || d.patient_name) && (
+          <InfoRow icon="person-outline" label="Patient" value={session.patient_name || d.patient_name} />
+        )}
+        {session.patient_id && (
+          <InfoRow icon="card-outline" label="Patient ID" value={session.patient_id} />
+        )}
+        {d.severity && (
+          <InfoRow
+            icon="pulse-outline"
+            label="Severity"
+            value={d.severity.toUpperCase()}
+            valueColor={d.severity === 'severe' ? C.red : d.severity === 'moderate' ? '#c09a1a' : '#3a6e00'}
+          />
+        )}
+
+        {/* SYMPTOMS */}
+        {symptoms.length > 0 && (
+          <Section icon="thermometer-outline" title="Symptoms">
+            <View style={s.chipWrap}>
+              {symptoms.map((sym, i) => (
+                <View key={i} style={s.chip}><Text style={s.chipText}>{sym}</Text></View>
+              ))}
+            </View>
+          </Section>
+        )}
+
+        {/* DURATION */}
+        {d.symptom_duration && (
+          <InfoRow icon="hourglass-outline" label="Duration" value={d.symptom_duration} />
+        )}
+
+        {/* DIAGNOSIS */}
+        {d.diagnosis && (
+          <InfoRow icon="medkit-outline" label="Diagnosis" value={d.diagnosis} bold />
+        )}
+
+        {/* MEDICATIONS */}
+        {medications.length > 0 && (
+          <Section icon="flask-outline" title="Medications">
+            {medications.map((med, i) => (
+              <View key={i} style={s.medCard}>
+                <View style={s.medName}>
+                  <Ionicons name="ellipse" size={6} color={C.dark} style={{ marginTop: 5 }} />
+                  <Text style={s.medNameText}>{med.name}</Text>
+                </View>
+                {(med.dosage || med.frequency) && (
+                  <Text style={s.medDetail}>{[med.dosage, med.frequency].filter(Boolean).join('  ·  ')}</Text>
+                )}
+              </View>
+            ))}
+          </Section>
+        )}
+
+        {/* VITALS */}
+        {Object.values(vitals).some(Boolean) && (
+          <Section icon="heart-outline" title="Vitals">
+            <View style={s.vitalsGrid}>
+              {vitals.bp    && <VitalTile label="Blood Pressure" value={vitals.bp}    icon="fitness-outline"   />}
+              {vitals.temp  && <VitalTile label="Temperature"    value={vitals.temp}  icon="thermometer-outline" />}
+              {vitals.pulse && <VitalTile label="Pulse"          value={vitals.pulse} icon="pulse-outline"     />}
+              {vitals.spo2  && <VitalTile label="SpO₂"           value={vitals.spo2}  icon="water-outline"     />}
+            </View>
+          </Section>
+        )}
+
+        {/* ALLERGIES */}
+        {(d.allergies || []).length > 0 && (
+          <Section icon="alert-circle-outline" title="Allergies">
+            <View style={s.chipWrap}>
+              {d.allergies.map((a, i) => (
+                <View key={i} style={[s.chip, { backgroundColor: '#fce8e6' }]}>
+                  <Text style={[s.chipText, { color: '#c0392b' }]}>{a}</Text>
+                </View>
+              ))}
+            </View>
+          </Section>
+        )}
+
+        {/* FOLLOW UP */}
+        {d.follow_up && (
+          <InfoRow icon="calendar-outline" label="Follow-up" value={d.follow_up} />
+        )}
+
+        {/* DOCTOR ASSIST — MISSING INFO */}
+        {missing.length > 0 && (
+          <View style={s.missingCard}>
+            <View style={s.missingHeader}>
+              <Ionicons name="warning-outline" size={16} color={C.warnB} />
+              <Text style={s.missingTitle}>Doctor Assist — Missing Information</Text>
+            </View>
+            {missing.map((item, i) => (
+              <View key={i} style={s.missingRow}>
+                <Ionicons name="alert-circle-outline" size={14} color={C.warnB} />
+                <Text style={s.missingText}>{item}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* RAW TRANSCRIPT */}
+        {session.raw_transcript && (
+          <View style={s.transcriptCard}>
+            <Text style={s.transcriptLabel}>Raw Transcript</Text>
+            <Text style={s.transcriptText}>{session.raw_transcript}</Text>
+          </View>
+        )}
+
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#FDF8F0' },
+// ── Sub-components ────────────────────────────────────────────────────────────
+function Section({ icon, title, children }) {
+  return (
+    <View style={s.sectionCard}>
+      <View style={s.sectionHeader}>
+        <Ionicons name={icon} size={15} color={C.gray} />
+        <Text style={s.sectionTitle}>{title}</Text>
+      </View>
+      {children}
+    </View>
+  );
+}
 
-  headerArea:     { paddingHorizontal: 22, paddingTop: 12, paddingBottom: 24 },
-  backBtn:        { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: '#1A1A1A', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  backText:       { fontSize: 13, fontWeight: '600', color: '#fff' },
+function InfoRow({ icon, label, value, bold, valueColor }) {
+  return (
+    <View style={s.infoRow}>
+      <Ionicons name={icon} size={16} color={C.muted} style={{ width: 24 }} />
+      <Text style={s.infoLabel}>{label}</Text>
+      <Text style={[s.infoValue, bold && { fontFamily: 'SpaceGrotesk_700Bold' }, valueColor && { color: valueColor }]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
 
-  statusBadge:    { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 },
-  statusText:     { fontSize: 13, fontWeight: '600' },
+function VitalTile({ label, value, icon }) {
+  return (
+    <View style={s.vitalTile}>
+      <Ionicons name={icon} size={18} color={C.gray} />
+      <Text style={s.vitalValue}>{value}</Text>
+      <Text style={s.vitalLabel}>{label}</Text>
+    </View>
+  );
+}
 
-  headerMeta:     { fontSize: 13, color: '#666', marginTop: 8 },
-  sessionId:      { fontSize: 11, color: '#aaa', marginTop: 4 },
+// ── Styles ────────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  scroll:    { paddingHorizontal: 20, paddingTop: 12 },
 
-  scroll:         { paddingHorizontal: 22, paddingTop: 24 },
+  backBtn:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20 },
+  backText:  { fontSize: 15, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
 
-  sectionLabel:   { fontSize: 11, fontWeight: '700', color: '#aaa', letterSpacing: 1.5, marginBottom: 10, marginTop: 4 },
+  titleRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  pageTitle:   { fontSize: 26, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: -0.5 },
+  statusBadge: { borderRadius: 50, paddingHorizontal: 12, paddingVertical: 5 },
+  statusText:  { fontSize: 12, fontFamily: 'SpaceGrotesk_700Bold' },
 
-  card:           { backgroundColor: '#fff', borderRadius: 20, padding: 18, borderWidth: 1, borderColor: '#E8E0D5', marginBottom: 20 },
-  transcriptText: { fontSize: 15, lineHeight: 24, color: '#1A1A1A' },
-  transcriptEmpty:{ fontSize: 14, color: '#bbb', fontStyle: 'italic' },
+  metaRow:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20 },
+  metaText: { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.muted },
+  metaDot:  { fontSize: 12, color: C.muted },
 
-  chipRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  entityChip:     { backgroundColor: '#F5B8DB', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
-  entityText:     { fontSize: 13, fontWeight: '600', color: '#1A1A1A' },
-  summaryText:    { fontSize: 14, color: '#444', lineHeight: 22, marginBottom: 20 },
+  summaryCard: { backgroundColor: C.dark, borderRadius: 20, padding: 18, marginBottom: 12 },
+  summaryText: { fontSize: 15, fontFamily: 'SpaceGrotesk_400Regular', color: C.white, lineHeight: 22 },
 
-  metaCard:       { borderRadius: 20, padding: 18, marginTop: 12, marginBottom: 12 },
-  metaGrid:       { gap: 12 },
-  metaItem:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  metaKey:        { fontSize: 13, color: '#888', fontWeight: '500' },
-  metaVal:        { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+  infoRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.white, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 13, marginBottom: 8 },
+  infoLabel: { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.muted, width: 88 },
+  infoValue: { flex: 1, fontSize: 14, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.dark },
 
-  actionsRow:     { flexDirection: 'row', gap: 10, marginTop: 16 },
-  actionPill:     { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1A1A1A', paddingHorizontal: 22, paddingVertical: 13, borderRadius: 32 },
-  actionPillText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  actionOutline:  { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 22, paddingVertical: 13, borderRadius: 32, borderWidth: 1.5, borderColor: '#1A1A1A' },
-  actionOutlineText: { color: '#1A1A1A', fontSize: 15, fontWeight: '700' },
+  sectionCard:   { backgroundColor: C.white, borderRadius: 18, padding: 16, marginBottom: 8, gap: 10 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sectionTitle:  { fontSize: 12, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 0.8 },
+
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip:     { backgroundColor: C.bg, borderRadius: 50, paddingHorizontal: 13, paddingVertical: 6 },
+  chipText: { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.dark },
+
+  medCard:     { gap: 3 },
+  medName:     { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  medNameText: { fontSize: 15, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, flex: 1 },
+  medDetail:   { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.gray, paddingLeft: 16, marginTop: 2 },
+
+  vitalsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  vitalTile:  { flex: 1, minWidth: 80, backgroundColor: C.bg, borderRadius: 14, padding: 14, alignItems: 'center', gap: 5 },
+  vitalValue: { fontSize: 17, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
+  vitalLabel: { fontSize: 11, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray, textAlign: 'center' },
+
+  missingCard:  { backgroundColor: C.warn, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: '#fcd34d', gap: 8, marginBottom: 8 },
+  missingHeader:{ flexDirection: 'row', alignItems: 'center', gap: 8 },
+  missingTitle: { fontSize: 13, fontFamily: 'SpaceGrotesk_700Bold', color: '#92400e', flex: 1 },
+  missingRow:   { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  missingText:  { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#92400e', flex: 1, lineHeight: 19 },
+
+  transcriptCard:  { backgroundColor: C.white, borderRadius: 18, padding: 16, marginBottom: 8 },
+  transcriptLabel: { fontSize: 11, fontFamily: 'SpaceGrotesk_700Bold', color: C.gray, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
+  transcriptText:  { fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, lineHeight: 22 },
 });
