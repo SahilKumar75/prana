@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../lib/api';
 
-const ACCENT = ['#F5B8DB', '#9AAB63', '#B6CAEB', '#F5D867'];
+const ACCENT = ['#FBBF24', '#9AAB63', '#B6CAEB', '#F5D867'];
 
 export default function HistoryScreen({ navigation }) {
   const [sessions, setSessions]     = useState([]);
@@ -46,7 +46,7 @@ export default function HistoryScreen({ navigation }) {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.center}><ActivityIndicator size="large" color="#F5B8DB" /></View>
+        <View style={styles.center}><ActivityIndicator size="large" color="#FBBF24" /></View>
       </SafeAreaView>
     );
   }
@@ -56,7 +56,7 @@ export default function HistoryScreen({ navigation }) {
       <Animated.View style={[{ flex: 1 }, { opacity: fade }]}>
         <ScrollView
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F5B8DB" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FBBF24" />}
           contentContainerStyle={styles.scroll}
         >
           {/* HEADER */}
@@ -88,9 +88,15 @@ export default function HistoryScreen({ navigation }) {
               </View>
               <View style={styles.card}>
                 {sessions.map((item, index) => {
-                  const accent = ACCENT[index % ACCENT.length];
-                  const lang   = (item.language || 'hi-IN').split('-')[0].toUpperCase();
-                  const isLast = index === sessions.length - 1;
+                  const accent   = ACCENT[index % ACCENT.length];
+                  const lang     = (item.language || 'hi-IN').split('-')[0].toUpperCase();
+                  const isLast   = index === sessions.length - 1;
+                  const d        = item.extracted_data || {};
+                  const label    = d.diagnosis || item.patient_name || 'Consultation';
+                  const topMed   = d.medications?.[0];
+                  const medLabel = topMed
+                    ? `${topMed.name}${topMed.dose_mg ? ' ' + topMed.dose_mg + 'mg' : topMed.dosage ? ' ' + topMed.dosage : ''}`
+                    : null;
                   return (
                     <TouchableOpacity
                       key={String(item.id)}
@@ -102,10 +108,15 @@ export default function HistoryScreen({ navigation }) {
                         <View style={[styles.rowDot, { backgroundColor: accent }]} />
                       </View>
                       <View style={styles.rowBody}>
-                        <Text style={styles.rowText} numberOfLines={1}>
-                          {item.raw_transcript || 'No transcript'}
-                        </Text>
-                        <Text style={styles.rowMeta}>{fmt(item.created_at)}</Text>
+                        <Text style={styles.rowText} numberOfLines={1}>{label}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {medLabel ? (
+                            <View style={[styles.medChip, { backgroundColor: accent + '33' }]}>
+                              <Text style={[styles.medChipText, { color: '#1A1A1A' }]}>{medLabel}</Text>
+                            </View>
+                          ) : null}
+                          <Text style={styles.rowMeta}>{fmt(item.created_at)}</Text>
+                        </View>
                       </View>
                       <View style={styles.rowRight}>
                         <View style={[styles.statusBadge, { backgroundColor: statusColor(item.status) + '22' }]}>
@@ -125,7 +136,7 @@ export default function HistoryScreen({ navigation }) {
           ) : (
             <View style={styles.emptyWrap}>
               <View style={styles.emptyIconWrap}>
-                <Ionicons name="mic-outline" size={28} color="#F5B8DB" />
+                <Ionicons name="mic-outline" size={28} color="#FBBF24" />
               </View>
               <Text style={styles.emptyTitle}>No sessions yet</Text>
               <Text style={styles.emptySub}>Your recordings will appear here</Text>
@@ -171,6 +182,9 @@ const styles = StyleSheet.create({
   statusText:        { fontSize: 11, fontWeight: '600' },
   langChip:          { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
   langChipText:      { fontSize: 10, fontWeight: '700', color: '#1A1A1A' },
+
+  medChip:           { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  medChipText:       { fontSize: 10, fontWeight: '600' },
 
   emptyWrap:         { alignItems: 'center', paddingVertical: 60, gap: 12 },
   emptyIconWrap:     { width: 64, height: 64, borderRadius: 32, backgroundColor: '#FFF0F7', alignItems: 'center', justifyContent: 'center' },

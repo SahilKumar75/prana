@@ -15,13 +15,13 @@ import {
 import { api } from '../../lib/api';
 import { useRole } from '../../context/RoleContext';
 
-const ACCENT = ['#F5B8DB', '#B6CAEB', '#9AAB63', '#F5D867'];
+const ACCENT = ['#FBBF24', '#B6CAEB', '#9AAB63', '#F5D867'];
 
 const C = {
   bg:    '#f2f3f5',
   white: '#ffffff',
   dark:  '#202020',
-  pink:  '#F5B8DB',
+  pink:  '#FBBF24',
   gray:  '#888888',
   muted: '#bbbbbe',
 };
@@ -112,11 +112,15 @@ export default function PatientHistoryScreen({ navigation }) {
               </View>
               <View style={styles.card}>
                 {sessions.map((item, index) => {
-                  const accent  = ACCENT[index % ACCENT.length];
-                  const lang    = (item.language || 'hi-IN').split('-')[0].toUpperCase();
-                  const isLast  = index === sessions.length - 1;
-                  const d       = item.extracted_data || {};
-                  const label   = d.diagnosis || 'Consultation';
+                  const accent   = ACCENT[index % ACCENT.length];
+                  const lang     = (item.language || 'hi-IN').split('-')[0].toUpperCase();
+                  const isLast   = index === sessions.length - 1;
+                  const d        = item.extracted_data || {};
+                  const label    = d.diagnosis || 'Consultation';
+                  const topMed   = d.medications?.[0];
+                  const medLabel = topMed
+                    ? `${topMed.name}${topMed.dose_mg ? ' ' + topMed.dose_mg + 'mg' : topMed.dosage ? ' ' + topMed.dosage : ''}`
+                    : null;
                   return (
                     <TouchableOpacity
                       key={String(item.id)}
@@ -127,7 +131,14 @@ export default function PatientHistoryScreen({ navigation }) {
                       <View style={[styles.rowAccent, { backgroundColor: accent }]} />
                       <View style={styles.rowBody}>
                         <Text style={styles.rowTitle}>{label}</Text>
-                        <Text style={styles.rowDate}>{fmt(item.created_at)}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+                          {medLabel ? (
+                            <View style={[styles.medChip, { backgroundColor: accent + '33' }]}>
+                              <Text style={[styles.medChipTxt, { color: '#1A1A1A' }]}>{medLabel}</Text>
+                            </View>
+                          ) : null}
+                          <Text style={styles.rowDate}>{fmt(item.created_at)}</Text>
+                        </View>
                       </View>
                       <View style={styles.rowRight}>
                         <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
@@ -183,6 +194,9 @@ const styles = StyleSheet.create({
   rowRight:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusTxt: { fontSize: 12, fontFamily: 'SpaceGrotesk_500Medium' },
+
+  medChip:    { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  medChipTxt: { fontSize: 10, fontFamily: 'SpaceGrotesk_600SemiBold' },
 
   empty:      { alignItems: 'center', paddingVertical: 60, gap: 8 },
   emptyTitle: { fontSize: 17, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.gray },

@@ -42,6 +42,7 @@ export const api = {
   // Save session with optional doctor/request context
   saveSession: async ({
     rawTranscript,
+    correctedTranscript = null,
     language       = 'hi-IN',
     detectedLang   = null,
     durationSecs   = null,
@@ -55,7 +56,8 @@ export const api = {
     const { data, error } = await supabase
       .from('sessions')
       .insert([{
-        raw_transcript:    rawTranscript,
+        raw_transcript:       rawTranscript,
+        corrected_transcript: correctedTranscript,
         language,
         detected_language: detectedLang || language,
         duration_seconds:  durationSecs ? Math.round(durationSecs) : null,

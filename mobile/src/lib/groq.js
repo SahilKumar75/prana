@@ -22,7 +22,7 @@ JSON structure (use null for missing fields, empty array [] for missing lists):
   "symptoms": ["list of symptoms mentioned"],
   "symptom_duration": "how long symptoms have been present or null",
   "diagnosis": "suspected or confirmed diagnosis or null",
-  "medications": [{"name": "drug name", "dosage": "amount", "frequency": "timing"}],
+  "medications": [{"name": "generic drug name", "prescription_name": "brand/trade name if mentioned or null", "dose_mg": "numeric dose in mg or null", "dosage": "full dosage string e.g. 500mg", "frequency": "timing e.g. twice daily", "duration": "e.g. 5 days or null"}],
   "allergies": ["list or empty"],
   "vitals": {"bp": "string or null", "temp": "string or null", "pulse": "string or null", "spo2": "string or null"},
   "follow_up": "follow-up instructions or null",
@@ -34,6 +34,41 @@ JSON structure (use null for missing fields, empty array [] for missing lists):
 
 For missing_info: flag anything clinically critical that was not mentioned — e.g. allergy history, vitals, diagnosis confirmation, medication dosage, duration of illness.
 For medications: capture ALL drugs, even if mentioned by Indian brand names or colloquially.`;
+
+// ─── Medical Transcript Correction ───────────────────────────────────────────
+// Post-processes raw Whisper output: fixes misheard drug names, dosages, medical
+// terms, and ambiguous regional speech. Returns corrected plain text.
+export async function correctTranscript(rawText, detectedLang = 'en') {
+  if (!rawText?.trim()) return rawText;
+  const langHint = { hi: 'Hindi', mr: 'Marathi', en: 'English' }[detectedLang] || 'mixed';
+  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY}` },
+    body: JSON.stringify({
+      model:       'llama-3.3-70b-versatile',
+      temperature: 0.1,
+      messages: [
+        {
+          role:    'system',
+          content: `You are a medical transcription correction engine for Indian hospitals. You receive raw ASR (Whisper) output from a doctor-patient consultation in ${langHint} (or code-switched). Your job:
+
+1. Fix misheard drug names (e.g. "Paracetamole" → "Paracetamol", "Pantaprazole" → "Pantoprazole", "Combiflame" → "Combiflam")
+2. Fix dosages written ambiguously (e.g. "five hundred mg" → "500mg", "twice" → "twice daily")  
+3. Fix misheard medical terms (e.g. "high pertension" → "hypertension", "diebetes" → "diabetes")
+4. Preserve original language — do NOT translate. If Hindi/Marathi sentence, keep it in Hindi/Marathi.
+5. Remove filler sounds (um, uh, hmm) but preserve all medical content
+6. Do NOT add or invent any medical information not present in the original
+
+Return ONLY the corrected transcript text. No explanation, no prefix, no markdown.`,
+        },
+        { role: 'user', content: rawText },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Correction failed: ${await res.text()}`);
+  const data = await res.json();
+  return data.choices[0].message.content?.trim() || rawText;
+}
 
 // ─── Whisper Speech-to-Text ───────────────────────────────────────────────────
 export async function transcribeAudio(audioUri, languageCode) {
@@ -134,6 +169,49 @@ export async function processAudio(audioUri, languageCode = 'hi-IN') {
     durationSecs:   stt.duration,
     extractedData:  extracted,
   };
+}
+
+// ─── Speaker Diarization ─────────────────────────────────────────────────────
+// Returns [{speaker: 'doctor'|'patient'|'noise', name: string, text: string}]
+export async function diarizeTranscript(rawText, doctorName, patientName, detectedLang) {
+  if (!rawText?.trim()) return [];
+  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY}` },
+    body: JSON.stringify({
+      model:           'llama-3.3-70b-versatile',
+      temperature:     0.1,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role:    'system',
+          content: `You are a speaker diarization engine for medical consultations. Split the raw transcript into individual utterances and attribute each to the correct speaker.
+
+Rules:
+- "doctor" speaks clinically: asks questions, gives diagnoses, prescribes, examines
+- "patient" describes symptoms, duration, pain, history, answers questions
+- "noise" is background sounds, coughs, or inaudible text — only include if significant
+- Preserve the original language of each utterance exactly — do NOT translate
+
+Return ONLY valid JSON: {"lines": [{"speaker": "doctor"|"patient"|"noise", "name": "<actual name>", "text": "<utterance>"}]}
+No markdown, no explanation.`,
+        },
+        {
+          role:    'user',
+          content: `Doctor: ${doctorName}. Patient: ${patientName}. Language: ${detectedLang || 'unknown'}.\n\nTranscript:\n${rawText}`,
+        },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Diarize failed: ${await res.text()}`);
+  const data    = await res.json();
+  const content = data.choices[0].message.content;
+  try {
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed.lines) ? parsed.lines : [];
+  } catch {
+    return [];
+  }
 }
 
 // ─── Transcript Translation ───────────────────────────────────────────────────

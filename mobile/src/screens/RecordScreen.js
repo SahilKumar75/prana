@@ -13,7 +13,7 @@ import {
   SpaceGrotesk_600SemiBold,
   SpaceGrotesk_700Bold,
 } from '@expo-google-fonts/space-grotesk';
-import { transcribeAudio, extractMedicalData, translateTranscript } from '../lib/groq';
+import { transcribeAudio, extractMedicalData, translateTranscript, diarizeTranscript, correctTranscript } from '../lib/groq';
 import { api } from '../lib/api';
 import CaseSelectModal from '../components/CaseSelectModal';
 
@@ -50,7 +50,7 @@ const toWhisperLang = (code) => {
   return code.split('-')[0]; // 'hi-IN' → 'hi', 'mr-IN' → 'mr', 'en-IN' → 'en'
 };
 
-const STAGE = { IDLE: 0, RECORDING: 1, TRANSCRIBING: 2, EXTRACTING: 3, DONE: 4, ERROR: 5 };
+const STAGE = { IDLE: 0, RECORDING: 1, TRANSCRIBING: 2, DIARIZING: 3, CORRECTING: 4, EXTRACTING: 5, DONE: 6, ERROR: 7 };
 
 const fmtTimer = (s) =>
   `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
@@ -86,6 +86,13 @@ export default function RecordScreen({ route }) {
   const [isFollowUp,    setIsFollowUp]    = useState(false);
   const [caseHistory,   setCaseHistory]   = useState([]);
 
+  // Speaker diarization
+  const [diarizedLines, setDiarizedLines] = useState([]);
+  const [isDiarizing,   setIsDiarizing]   = useState(false);
+
+  // Corrected transcript (post-processing layer)
+  const [correctedTranscript, setCorrectedTranscript] = useState('');
+
   // Generate a stable session reference ID for this recording session
   const sessionRef = useRef((() => {
     const now  = new Date();
@@ -100,25 +107,45 @@ export default function RecordScreen({ route }) {
   // Transcript display language (translation)
   const [displayLang,    setDisplayLang]    = useState('original');
   const [translatedText, setTranslatedText] = useState({});
+  // Per-language cache of translated diarized lines: { hi: [{...line, text: '...'}], ... }
+  const [translatedLines, setTranslatedLines] = useState({});
   const [isTranslating,  setIsTranslating]  = useState(false);
   const [translateError, setTranslateError] = useState(null);
 
   // Reset display language when a new transcript arrives
-  useEffect(() => { setDisplayLang('original'); setTranslatedText({}); setTranslateError(null); }, [transcript]);
+  useEffect(() => {
+    setDisplayLang('original');
+    setTranslatedText({});
+    setTranslatedLines({});
+    setTranslateError(null);
+  }, [transcript]);
 
   // Handle transcript display language change
   const handleDisplayLang = async (lang) => {
     if (lang === 'original') { setDisplayLang('original'); return; }
     setTranslateError(null);
-    // Already fetched successfully — just switch
+    // Already cached — just switch
     if (translatedText[lang] != null) { setDisplayLang(lang); return; }
-    // Start fetching: set isTranslating + displayLang in the same synchronous pass
-    // so React batches them into one render → spinner is shown before Text mounts
     setIsTranslating(true);
     setDisplayLang(lang);
     try {
-      const result = await translateTranscript(transcript, lang);
-      setTranslatedText((prev) => ({ ...prev, [lang]: result || '' }));
+      // If diarized, translate each line individually to keep bubble structure
+      if (diarizedLines.length > 0) {
+        const translatedLinesCopy = await Promise.all(
+          diarizedLines.map(async (line, idx) => ({
+            // Always pin speaker + name from the original diarized line by index
+            speaker: diarizedLines[idx].speaker,
+            name:    diarizedLines[idx].name,
+            text:    await translateTranscript(line.text, lang),
+          }))
+        );
+        setTranslatedLines((prev) => ({ ...prev, [lang]: translatedLinesCopy }));
+        // Also cache a flat version for fallback
+        setTranslatedText((prev) => ({ ...prev, [lang]: translatedLinesCopy.map(l => l.text).join('\n') }));
+      } else {
+        const result = await translateTranscript(transcript, lang);
+        setTranslatedText((prev) => ({ ...prev, [lang]: result || '' }));
+      }
     } catch (e) {
       setTranslateError(e.message || 'Translation failed');
       setDisplayLang('original');
@@ -137,10 +164,12 @@ export default function RecordScreen({ route }) {
   const barAnims    = useRef([0,1,2,3,4].map(() => new Animated.Value(4))).current;
 
   const isRecording    = stage === STAGE.RECORDING;
-  const isTranscribing = stage === STAGE.TRANSCRIBING;
+  const isTranscribing  = stage === STAGE.TRANSCRIBING;
+  const isDiarizingStage = stage === STAGE.DIARIZING;
+  const isCorrectingStage = stage === STAGE.CORRECTING;
   const isExtracting   = stage === STAGE.EXTRACTING;
   const isDone         = stage === STAGE.DONE;
-  const isBusy         = isTranscribing || isExtracting;
+  const isBusy         = isTranscribing || isDiarizingStage || isCorrectingStage || isExtracting;
 
   useEffect(() => {
     if (isRecording) {
@@ -228,6 +257,34 @@ export default function RecordScreen({ route }) {
       setTranscript(stt.text);
       setDetectedLang(stt.language);
       setDurationSecs(stt.duration || duration);
+      // Auto-diarize when both patient and doctor context are available
+      if (routePatient && routeDoctor && stt.text.trim()) {
+        setStage(STAGE.DIARIZING);
+        setIsDiarizing(true);
+        try {
+          const lines = await diarizeTranscript(
+            stt.text, routeDoctor.name, routePatient.name, stt.language
+          );
+          // Normalize speaker to lowercase so style conditions are reliable
+          setDiarizedLines(
+            lines
+              .filter(l => l.speaker !== 'noise' && l.text?.trim())
+              .map(l => ({ ...l, speaker: l.speaker?.toLowerCase() }))
+          );
+        } catch (_) {
+          setDiarizedLines([]);
+        } finally {
+          setIsDiarizing(false);
+        }
+      }
+      // Correction pass — fix misheard drug names, dosages, medical terms
+      setStage(STAGE.CORRECTING);
+      try {
+        const corrected = await correctTranscript(stt.text, stt.language);
+        setCorrectedTranscript(corrected);
+      } catch (_) {
+        setCorrectedTranscript(stt.text); // fallback to raw
+      }
       setStage(STAGE.IDLE);
     } catch {
       setStage(STAGE.IDLE);
@@ -239,16 +296,18 @@ export default function RecordScreen({ route }) {
     if (!transcript.trim()) { Alert.alert('Empty', 'No transcript to process.'); return; }
     setStage(STAGE.EXTRACTING); setErrMsg('');
     try {
-      // Pass case history for follow-up visits (RAG)
-      const extracted = await extractMedicalData(transcript, language, isFollowUp ? caseHistory : []);
+      // Pass corrected transcript to AI — falls back to raw if correction wasn't run
+      const textForAI = correctedTranscript || transcript;
+      const extracted = await extractMedicalData(textForAI, language, isFollowUp ? caseHistory : []);
       const saved     = await api.saveSession({
         rawTranscript: transcript,
+        correctedTranscript: correctedTranscript || null,
         language,
         detectedLang,
         durationSecs,
         extractedData: extracted,
-        patientName:   patientName.trim() || null,
-        patientId:     patientId.trim()   || null,
+        patientName:   routePatient?.name  || patientName.trim() || null,
+        patientId:     routePatient?.patientDbId || patientId.trim() || null,
         doctorId:      routeDoctor?.id    || null,
         requestId:     routeRequestId     || null,
         caseId:        activeCaseId       || null,
@@ -268,6 +327,7 @@ export default function RecordScreen({ route }) {
     setStage(STAGE.IDLE);
     setTranscript(''); setDetectedLang(null);
     setResult(null); setErrMsg(''); setTimer(0);
+    setDiarizedLines([]); setIsDiarizing(false); setTranslatedLines({}); setCorrectedTranscript('');
     setPatientName(routePatient?.name || '');
     setPatientId(routePatient?.id   || '');
     // Don't reset case — stay in the same case context
@@ -381,6 +441,10 @@ export default function RecordScreen({ route }) {
             </View>
           ) : isTranscribing ? (
             <Text style={s.statusHint}>Transcribing audio…</Text>
+          ) : isDiarizingStage ? (
+            <Text style={s.statusHint}>Identifying speakers…</Text>
+          ) : isCorrectingStage ? (
+            <Text style={s.statusHint}>Correcting transcript…</Text>
           ) : isDone ? (
             <Text style={s.doneHint}>Session saved ✓</Text>
           ) : (
@@ -458,10 +522,36 @@ export default function RecordScreen({ route }) {
               </View>
             ) : null}
 
-            {isTranslating ? (
+            {isDiarizing ? (
+              <View style={s.translatingRow}>
+                <ActivityIndicator size="small" color={C.gray} />
+                <Text style={s.translatingTxt}>Identifying speakers…</Text>
+              </View>
+            ) : isTranslating ? (
               <View style={s.translatingRow}>
                 <ActivityIndicator size="small" color={C.gray} />
                 <Text style={s.translatingTxt}>Translating…</Text>
+              </View>
+            ) : diarizedLines.length > 0 ? (
+              /* ── Conversation bubbles ── (all language tabs) */
+              <View style={s.conversationWrap}>
+                {(displayLang === 'original'
+                  ? diarizedLines
+                  : (translatedLines[displayLang] || diarizedLines)
+                ).map((line, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      s.bubble,
+                      line.speaker?.toLowerCase() === 'doctor' ? s.bubbleDoctor : s.bubblePatient,
+                    ]}
+                  >
+                    <Text style={s.bubbleLabel}>
+                      {line.name} ({line.speaker})
+                    </Text>
+                    <Text style={s.bubbleText}>{line.text}</Text>
+                  </View>
+                ))}
               </View>
             ) : displayLang === 'original' ? (
               <TextInput
@@ -549,8 +639,8 @@ export default function RecordScreen({ route }) {
               ? <ActivityIndicator color={C.dark} size="small" />
               : (
                 <>
-                  <Ionicons name="sparkles-outline" size={16} color={C.dark} />
-                  <Text style={s.processBtnText}>Process with AI</Text>
+                  <Ionicons name="checkmark-circle-outline" size={16} color={C.dark} />
+                  <Text style={s.processBtnText}>End Session</Text>
                 </>
               )
             }
@@ -702,8 +792,8 @@ const s = StyleSheet.create({
   headerTitle: { fontSize: 38, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: -1.5, lineHeight: 42 },
   resetBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: C.white, justifyContent: 'center', alignItems: 'center' },
 
-  ctxBanner:   { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F5B8DB', borderRadius: 18, padding: 14, marginBottom: 16 },
-  fusedPatientBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F5B8DB', padding: 14 },
+  ctxBanner:   { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FBBF24', borderRadius: 18, padding: 14, marginBottom: 16 },
+  fusedPatientBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FBBF24', padding: 14 },
   ctxCaseType: { fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, opacity: 0.65, marginTop: 2 },
   ctxIconWrap: { width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.08)', alignItems: 'center', justifyContent: 'center' },
   ctxBody:     { flex: 1 },
@@ -749,6 +839,14 @@ const s = StyleSheet.create({
   dispPillTxtActive:{ fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.white },
   translatingRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, minHeight: 60 },
   translatingTxt:  { fontSize: 13, fontFamily: 'SpaceGrotesk_400Regular', color: C.gray },
+
+  // Conversation / diarization bubbles
+  conversationWrap:  { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
+  bubble:            { maxWidth: '84%', borderRadius: 16, padding: 12, gap: 3 },
+  bubblePatient:     { alignSelf: 'flex-start', backgroundColor: '#FBBF24' },
+  bubbleDoctor:      { alignSelf: 'flex-end',   backgroundColor: '#c9f158' },
+  bubbleLabel:       { fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold', color: 'rgba(32,32,32,0.55)', textTransform: 'capitalize' },
+  bubbleText:        { fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', color: '#202020', lineHeight: 21 },
   translateErrRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingBottom: 8, backgroundColor: '#fef3c7', borderRadius: 8, marginHorizontal: 10, marginBottom: 4 },
   translateErrTxt: { flex: 1, fontSize: 12, fontFamily: 'SpaceGrotesk_400Regular', color: '#b45309', paddingTop: 8 },
   transcriptInput: { padding: 14, paddingTop: 10, fontSize: 14, fontFamily: 'SpaceGrotesk_400Regular', color: C.dark, minHeight: 100, lineHeight: 22 },

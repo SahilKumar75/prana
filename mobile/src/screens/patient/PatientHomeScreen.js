@@ -19,7 +19,7 @@ const C = {
   bg:    '#f2f3f5',
   white: '#ffffff',
   dark:  '#202020',
-  pink:  '#F5B8DB',
+  pink:  '#FBBF24',
   teal:  '#B6CAEB',
   lime:  '#c9f158',
   gray:  '#888888',
@@ -139,7 +139,7 @@ const vc = StyleSheet.create({
   badgeTxt: { fontSize: 11, fontFamily: 'SpaceGrotesk_600SemiBold' },
 });
 
-const ACCENTS = ['#F5B8DB', '#9AAB63', '#B6CAEB', '#F5D867', '#F5B8DB'];
+const ACCENTS = ['#FBBF24', '#9AAB63', '#B6CAEB', '#F5D867', '#FBBF24'];
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function PatientHomeScreen({ navigation }) {

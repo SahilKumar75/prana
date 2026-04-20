@@ -315,7 +315,7 @@ export default function DashboardScreen({ navigation }) {
           <View style={s.heroRow}>
             <Text style={s.heroCount}>{loading ? '-' : stats.total}</Text>
           </View>
-          <TouchableOpacity style={s.startBtn} activeOpacity={0.85} onPress={() => navigation.navigate('Record')}>
+          <TouchableOpacity style={s.startBtn} activeOpacity={0.85} onPress={() => navigation.navigate('Record', { patientProfile: undefined, doctorProfile: undefined, sessionRequestId: undefined })}>
             <Text style={s.startTxt}>Start recording</Text>
           </TouchableOpacity>
         </View>
@@ -335,7 +335,7 @@ export default function DashboardScreen({ navigation }) {
             {acceptedPatients.map((req) => (
               <PatientCard key={req.id} req={req} onPress={() => handleStartSession(req)} />
             ))}
-            <TouchableOpacity style={[pc.card, { backgroundColor: C.dark }]} activeOpacity={0.85} onPress={() => navigation.navigate('Record')}>
+            <TouchableOpacity style={[pc.card, { backgroundColor: C.dark }]} activeOpacity={0.85} onPress={() => navigation.navigate('Record', { patientProfile: undefined, doctorProfile: undefined, sessionRequestId: undefined })}>
               <View style={pc.top}>
                 <Text style={[pc.logo, { color: C.white }]}>P.</Text>
                 <Ionicons name="mic-outline" size={20} color={C.white} />
@@ -412,12 +412,12 @@ const s = StyleSheet.create({
   offlineBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FEF3C7', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 },
   offlineTxt:    { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: '#92400e', flex: 1 },
 
-  heroCard:  { backgroundColor: C.white, borderRadius: 24, padding: 22, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12, elevation: 4 },
-  heroLabel: { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: C.gray, marginBottom: 6 },
+  heroCard:  { backgroundColor: C.lime, borderRadius: 24, padding: 22, marginBottom: 24 },
+  heroLabel: { fontSize: 13, fontFamily: 'SpaceGrotesk_500Medium', color: 'rgba(32,32,32,0.6)', marginBottom: 6 },
   heroRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
   heroCount: { fontSize: 48, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark, letterSpacing: -2 },
   startBtn:  { backgroundColor: C.dark, borderRadius: 50, paddingVertical: 15, alignItems: 'center' },
-  startTxt:  { fontSize: 15, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.white },
+  startTxt:  { fontSize: 15, fontFamily: 'SpaceGrotesk_600SemiBold', color: C.lime },
 
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle:  { fontSize: 17, fontFamily: 'SpaceGrotesk_700Bold', color: C.dark },
